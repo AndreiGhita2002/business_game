@@ -1,19 +1,8 @@
-/*******************************************************************************************
-*
-*   raylib-cpp [core] example - Basic window (adapted for HTML5 platform)
-*
-*   This example is prepared to compile for PLATFORM_WEB, PLATFORM_DESKTOP and PLATFORM_RPI
-*   As you will notice, code structure is slightly diferent to the other examples...
-*   To compile it for PLATFORM_WEB just uncomment #define PLATFORM_WEB at beginning
-*
-*   This example has been created using raylib-cpp (www.raylib.com)
-*   raylib is licensed under an unmodified zlib/libpng license (View raylib.h for details)
-*
-*   Copyright (c) 2015 Ramon Santamaria (@raysan5)
-*
-********************************************************************************************/
+//
+// Created by Andrei Ghita on 01.09.2025.
+//
+
 #include "main.hpp"
-#include <iostream>
 #include "raylib-cpp.hpp"
 
 #if defined(PLATFORM_WEB)
@@ -67,7 +56,7 @@ int main() {
 #else
     SetTargetFPS(60);
 
-    while (!global::window.ShouldClose()) {
+    while (!raylib::Window::ShouldClose()) {
         global::mainLoop();
     }
 #endif
