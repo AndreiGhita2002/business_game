@@ -5,14 +5,11 @@
 #ifndef BUSINESS_GAME_MAIN_HPP
 #define BUSINESS_GAME_MAIN_HPP
 #include <Camera3D.hpp>
-#include <Window.hpp>
+#include "gameMap.hpp"
 
 namespace global {
-    inline bool initialised = false;
-    raylib::Window window;
-    inline struct State {
-        raylib::Camera camera;
-    } state;
+    inline raylib::Camera camera;
+    inline GameMap* game_map;
 
     static void init();
     static void mainLoop();

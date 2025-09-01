@@ -12,38 +12,48 @@
 
 void global::init() {
     // window = raylib::Window(800, 450, "business game");
-    window.Init(800, 450, "business game");
-    state.camera = {
+    raylib::Window::Init(800, 450, "business game");
+    camera = {
         {
-            { 0.0f, 10.0f, 10.0f },
+            { 5.0f, 5.0f, 5.0f },
             { 0.0f, 0.0f, 0.0f },
             { 0.0f, 1.0f, 0.0f },
             45.0f,
             0
         },
     };
+    game_map = new GameMap(8, 8);
+    game_map->terrain_elevation[0]++;
 }
 
 void global::shutdown() {
-    window.Close();
+    delete game_map;
+    raylib::Window::Close();
 }
 
 void global::mainLoop() {
     // Update
-    Vector3 boxPos = { -4.0f, 1.0f, 0.0f };
-    Vector3 boxSize = { 2.0f, 2.0f, 2.0f };
+    // Vector3 boxPos = { -game_map->size_x / 2.0f, 0.0f, -game_map->size_y / 2.0f };
+    Vector3 boxPos = { -(game_map->size_x / 2.0f), 0.0f, -(game_map->size_y / 2.0f) };
+    Vector3 boxSize = { 1.0f, 1.0f, 1.0f };
 
     // Draw
     BeginDrawing();
     {
         ClearBackground(RAYWHITE);
-        BeginMode3D(global::state.camera);
+        BeginMode3D(camera);
         {
-            DrawCube(boxPos, boxSize.x, boxSize.y, boxSize.z, GRAY);
-            DrawCubeWires(boxPos, boxSize.x, boxSize.y, boxSize.z, DARKGRAY);
+            for (auto iy = 0; iy < game_map->size_y; ++iy) {
+                for (auto ix = 0; ix < game_map->size_x; ++ix) {
+                    auto height = game_map->get_build_elevation(ix, iy);
+                    Vector3 pos = {boxPos.x + ix, boxPos.y + height, boxPos.z + iy};
+                    auto col = (ix + (iy % 4 >= 2 ? 2 : 0)) % 4 >= 2 ? GRAY : RED;
+                    DrawCube(pos, boxSize.x, boxSize.y, boxSize.z, col);
+                    DrawCubeWires(pos, boxSize.x, boxSize.y, boxSize.z, BLACK);
+                }
+            }
         }
         EndMode3D();
-        DrawText("Congrats! You created your first raylib-cpp window!", 160, 200, 20, LIGHTGRAY);
     }
     EndDrawing();
 }
