@@ -6,7 +6,15 @@
 #define BUSINESS_GAME_GAMEMAP_HPP
 #include <cstdint>
 
-enum BuildTileType {Flat, Slope};
+// Slope naming conventions:
+//  Slope[+y][-y][+x][-y]
+enum BuildTileType {
+    Flat, Air,
+    Slope0, Slope1, Slope2, Slope3,
+    Slope4, Slope5, Slope6, Slope7,
+    Slope8, Slope9, Slope10, Slope11,
+    Slope12, Slope13, Slope14, Slope15
+};
 
 
 class GameMap {
