@@ -31,11 +31,74 @@ void global::shutdown() {
     raylib::Window::Close();
 }
 
+void global::updateCamera() {
+    const float moveSpeed = 0.2f;
+    const float panSpeed  = 0.05f; // radians per frame
+
+    // X/Z movement
+    if (IsKeyDown(KEY_S)) {
+        camera.position.x += moveSpeed;
+        camera.position.z += moveSpeed;
+        camera.target.x   += moveSpeed;
+        camera.target.z   += moveSpeed;
+    }
+    else if (IsKeyDown(KEY_W)) {
+        camera.position.x -= moveSpeed;
+        camera.position.z -= moveSpeed;
+        camera.target.x   -= moveSpeed;
+        camera.target.z   -= moveSpeed;
+    }
+    else if (IsKeyDown(KEY_A)) {
+        camera.position.x -= moveSpeed;
+        camera.position.z += moveSpeed;
+        camera.target.x   -= moveSpeed;
+        camera.target.z   += moveSpeed;
+    }
+    else if (IsKeyDown(KEY_D)) {
+        camera.position.x += moveSpeed;
+        camera.position.z -= moveSpeed;
+        camera.target.x   += moveSpeed;
+        camera.target.z   -= moveSpeed;
+    }
+
+    // Panning
+    if (IsKeyDown(KEY_Q) || IsKeyDown(KEY_E)) {
+        float angle = (IsKeyDown(KEY_Q) ? -panSpeed : panSpeed);
+
+        // Vector from camera to target
+        float dx = camera.target.x - camera.position.x;
+        float dz = camera.target.z - camera.position.z;
+
+        // Apply 2D rotation around Y axis
+        float cosA = cosf(angle);
+        float sinA = sinf(angle);
+
+        float newDx = dx * cosA - dz * sinA;
+        float newDz = dx * sinA + dz * cosA;
+
+        camera.target.x = camera.position.x + newDx;
+        camera.target.z = camera.position.z + newDz;
+    }
+
+    // Vertical movement
+    if (IsKeyDown(KEY_F)) {
+        camera.position.y += moveSpeed;
+        camera.target.y   += moveSpeed;
+    }
+    else if (IsKeyDown(KEY_C)) {
+        camera.position.y -= moveSpeed;
+        camera.target.y   -= moveSpeed;
+    }
+}
+
+
+
 void global::mainLoop() {
+    const Vector3 boxPos = { -(game_map->size_x / 2.0f), 0.0f, -(game_map->size_y / 2.0f) };
+    const Vector3 boxSize = { 1.0f, 1.0f, 1.0f };
+
     // Update
-    // Vector3 boxPos = { -game_map->size_x / 2.0f, 0.0f, -game_map->size_y / 2.0f };
-    Vector3 boxPos = { -(game_map->size_x / 2.0f), 0.0f, -(game_map->size_y / 2.0f) };
-    Vector3 boxSize = { 1.0f, 1.0f, 1.0f };
+    updateCamera();
 
     // Draw
     BeginDrawing();

@@ -14,6 +14,8 @@ namespace global {
     static void init();
     static void mainLoop();
     static void shutdown();
+
+    static void updateCamera();
 }
 
 
