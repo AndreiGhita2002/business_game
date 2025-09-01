@@ -9,7 +9,7 @@ GameMap::GameMap(const uint32_t size_x, const uint32_t size_y) {
     this->size_y = size_y;
 
     this->terrain_elevation = new uint8_t[size_x * size_y / 4]{0};
-    this->build_tiles = new BuildTileType[size_x * size_y]{Flat};
+    this->build_tiles = new BuildTileType[size_x * size_y / 2]{Flat};
 }
 
 GameMap::~GameMap() {

@@ -16,7 +16,7 @@ public:
     uint32_t size_x, size_y;
 
     //Terrain Elevation Grid
-    // array size is [(size_y * size_x) / 4]
+    // array size is [(size_x * size_y) / 4]
     uint8_t* terrain_elevation;
 
     //Build Grid - subgrid of the terrain grid
