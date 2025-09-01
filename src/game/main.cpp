@@ -19,35 +19,20 @@
     #include <emscripten/emscripten.h>
 #endif
 
-//----------------------------------------------------------------------------------
-// Global Variables Definition
-//----------------------------------------------------------------------------------
 int screenWidth = 800;
 int screenHeight = 450;
 
-//----------------------------------------------------------------------------------
-// Module Functions Declaration
-//----------------------------------------------------------------------------------
 void UpdateDrawFrame(void);     // Update and Draw one frame
 
-//----------------------------------------------------------------------------------
-// Main Enry Point
-//----------------------------------------------------------------------------------
-int main()
-{
-    // Initialization
-    //--------------------------------------------------------------------------------------
+int main() {
     raylib::Window window(screenWidth, screenHeight, "raylib-cpp [core] example - basic window");
 
 #if defined(PLATFORM_WEB)
     emscripten_set_main_loop(UpdateDrawFrame, 0, 1);
 #else
-    SetTargetFPS(60);   // Set our game to run at 60 frames-per-second
-    //--------------------------------------------------------------------------------------
+    SetTargetFPS(60);
 
-    // Main game loop
-    while (!window.ShouldClose())    // Detect window close button or ESC key
-    {
+    while (!window.ShouldClose()) {
         UpdateDrawFrame();
     }
 #endif
@@ -55,18 +40,10 @@ int main()
     return 0;
 }
 
-//----------------------------------------------------------------------------------
-// Module Functions Definition
-//----------------------------------------------------------------------------------
-void UpdateDrawFrame(void)
-{
+void UpdateDrawFrame(void) {
     // Update
-    //----------------------------------------------------------------------------------
-    // TODO: Update your variables here
-    //----------------------------------------------------------------------------------
 
     // Draw
-    //----------------------------------------------------------------------------------
     BeginDrawing();
 
         ClearBackground(RAYWHITE);
@@ -74,5 +51,4 @@ void UpdateDrawFrame(void)
         DrawText("Congrats! You created your first raylib-cpp window!", 160, 200, 20, LIGHTGRAY);
 
     EndDrawing();
-    //----------------------------------------------------------------------------------
 }
