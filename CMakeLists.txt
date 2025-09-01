@@ -36,6 +36,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # === Main executable ===
 add_executable(${PROJECT_NAME}
         ${CMAKE_SOURCE_DIR}/src/game/main.cpp
+        ${CMAKE_SOURCE_DIR}/src/game/main.hpp
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE raylib raylib_cpp)
