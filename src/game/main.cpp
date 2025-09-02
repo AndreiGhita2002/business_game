@@ -117,9 +117,9 @@ void global::mainLoop() {
         {
             for (auto iy = 0; iy < game_map->size_y; ++iy) {
                 for (auto ix = 0; ix < game_map->size_x; ++ix) {
-                    auto height = game_map->get_build_elevation(ix, iy);
+                    auto height = game_map->get_terrain_elevation(ix, iy);
                     Vector3 pos = {boxPos.x + ix, boxPos.y + height, boxPos.z + iy};
-                    auto col = (ix + (iy % 4 >= 2 ? 2 : 0)) % 4 >= 2 ? GRAY : RED;
+                    auto col = height < 3 ? DARKGREEN : GRAY;
                     DrawCube(pos, boxSize.x, boxSize.y, boxSize.z, col);
                     DrawCubeWires(pos, boxSize.x, boxSize.y, boxSize.z, BLACK);
                 }

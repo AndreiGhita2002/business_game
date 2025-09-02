@@ -35,12 +35,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # === Main executable ===
 add_executable(${PROJECT_NAME}
-        ${CMAKE_SOURCE_DIR}/src/game/main.cpp
-        ${CMAKE_SOURCE_DIR}/src/game/main.hpp
+        src/game/main.cpp
+        src/game/main.hpp
         src/game/gameMap.cpp
         src/game/gameMap.hpp
+        includes/PerlinNoise.hpp
 )
 
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/includes)
 target_link_libraries(${PROJECT_NAME} PRIVATE raylib raylib_cpp)
 
 # macOS frameworks
