@@ -22,8 +22,7 @@ void global::init() {
             0
         },
     };
-    game_map = new GameMap(100, 100);
-    game_map->terrain_elevation[0]++;
+    game_map = new GameMap(128, 128);
 }
 
 void global::shutdown() {
@@ -117,11 +116,22 @@ void global::mainLoop() {
         {
             for (auto iy = 0; iy < game_map->size_y; ++iy) {
                 for (auto ix = 0; ix < game_map->size_x; ++ix) {
-                    auto height = game_map->get_terrain_elevation(ix, iy);
-                    Vector3 pos = {boxPos.x + ix, boxPos.y + height, boxPos.z + iy};
-                    auto col = height < 3 ? DARKGREEN : GRAY;
-                    DrawCube(pos, boxSize.x, boxSize.y, boxSize.z, col);
-                    DrawCubeWires(pos, boxSize.x, boxSize.y, boxSize.z, BLACK);
+                    for (auto iz = 0; iz < CHUNK_SIZE; ++iz) {
+                        auto pv = game_map->get_voxel({ix, iy, iz});
+                        if (!pv) continue; // voxel is not allocated
+
+                        GameMap::VoxelID v = *pv;
+                        if (v == 0) continue; // voxel is air
+
+                        Vector3 pos = {
+                            boxPos.x + static_cast<float>(ix),
+                            boxPos.y + static_cast<float>(iz),
+                            boxPos.z + static_cast<float>(iy),
+                        };
+                        auto col = game_map->voxelColourMap.at(v);
+                        DrawCube(pos, boxSize.x, boxSize.y, boxSize.z, col);
+                        DrawCubeWires(pos, boxSize.x, boxSize.y, boxSize.z, BLACK);
+                    }
                 }
             }
         }

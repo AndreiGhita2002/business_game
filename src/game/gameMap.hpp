@@ -4,24 +4,44 @@
 
 #ifndef BUSINESS_GAME_GAMEMAP_HPP
 #define BUSINESS_GAME_GAMEMAP_HPP
+#include <Color.hpp>
 #include <cstdint>
+#include <map>
 
-#define VOXEL_TYPE uint8_t
+// REMINDER: Z goes UP/DOWN
 
 class GameMap {
 
 public:
-    uint32_t size_x, size_y;
+    #define CHUNK_SIZE 16
+    using VoxelID = uint8_t;
+    using VoxelChunk = std::array<VoxelID,CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE>;
+    using Int2 = std::pair<int,int>;
+    using Int3 = std::tuple<int,int,int>;
 
-    // Terrain data
-    uint8_t* terrain_elevation;
-    VOXEL_TYPE* terrain_types;
+    uint32_t size_x, size_y;
+    uint32_t chunks_x, chunks_y;
+    std::map<VoxelID, Color> voxelColourMap;
+    std::map<Int2, VoxelChunk> chunkMap;
 
     GameMap(uint32_t size_x, uint32_t size_y);
     ~GameMap();
 
-    uint8_t get_terrain_elevation(uint32_t x, uint32_t y) const;
-    VOXEL_TYPE get_terrain_type(uint32_t x, uint32_t y) const;
+    VoxelChunk* get_chunk(Int2 pos);
+    VoxelID* get_voxel(Int3 pos);
+    static VoxelID* get_chunk_voxel(VoxelChunk& chunk, Int3 pos);
+
+private:
+    // helper: floor division/modulo that work for negatives
+    static int floordiv(int a, int b) {
+        int q = a / b;
+        int r = a % b;
+        return (r && ((r > 0) != (b > 0))) ? (q - 1) : q;
+    }
+    static int floormod(int a, int b) {
+        int m = a % b;
+        return (m < 0) ? (m + (b > 0 ? b : -b)) : m;
+    }
 };
 
 

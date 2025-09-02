@@ -4,33 +4,81 @@
 
 #include "gameMap.hpp"
 #include "PerlinNoise.hpp"
-#include <cmath>
 
 GameMap::GameMap(const uint32_t size_x, const uint32_t size_y) {
     this->size_x = size_x;
     this->size_y = size_y;
+    this->chunks_x = size_x / 16 + (size_x % 16 ? 1 : 0);
+    this->chunks_y = size_x / 16 + (size_x % 16 ? 1 : 0);
+
+    this->voxelColourMap = std::map<VoxelID, Color>();
+    voxelColourMap.insert(std::pair<VoxelID, Color>(0, RED)); // air, should not be seen
+    voxelColourMap.insert(std::pair<VoxelID, Color>(1, BEIGE));
+    voxelColourMap.insert(std::pair<VoxelID, Color>(2, DARKGREEN));
+
+    this->chunkMap = std::map<Int2, VoxelChunk>();
+    for (int ix = 0; ix < chunks_x; ++ix) {
+        for (int iy = 0; iy < chunks_y; ++iy) {
+            chunkMap[{iy, ix}] = VoxelChunk{};
+        }
+    }
 
     const siv::PerlinNoise::seed_type seed = 123456u;
     const siv::PerlinNoise perlin{ seed };
 
-    this->terrain_elevation = new uint8_t[size_x * size_y]{0};
-    this->terrain_types = new VOXEL_TYPE[size_x * size_y]{0};
-
     for (int i = 0; i < size_x * size_y; i++) {
-        float noise = perlin.noise2D((i % size_x) * 0.1, (i / size_x) * 0.1) * 8;
-        this->terrain_elevation[i] = abs(noise);
+        auto ix = i % size_x, iy = i / size_x;
+
+        // Perlin Noise Generation
+        float noise = perlin.noise2D(ix * 0.05, iy * 0.05) * CHUNK_SIZE;
+        int height = std::clamp(static_cast<int>(noise), 0, CHUNK_SIZE - 1);
+
+        // Lift the edges to see the clear limit of the chunks
+        // auto cx = ix % 16, cy = iy % 16;
+        // bool is_edge = cx == 0 || cy == 0;// || cx == CHUNK_SIZE -2 || cy == CHUNK_SIZE - 2;
+        // int height = is_edge ? 3 : 1;
+
+        for (int j = 0; j <= height; j++) {
+            VoxelID voxel_type = j < 3 ? 1 : 2;
+            auto v = get_voxel({ix, iy, j});
+            *v = voxel_type;
+        }
     }
 }
 
-GameMap::~GameMap() {
-    delete[] terrain_elevation;
-    delete[] terrain_types;
+GameMap::~GameMap() {}
+
+GameMap::VoxelChunk* GameMap::get_chunk(Int2 pos) {
+    // finding the chunk
+    const int cx = floordiv(std::get<0>(pos), CHUNK_SIZE);
+    const int cy = floordiv(std::get<1>(pos), CHUNK_SIZE);
+
+    auto pair = chunkMap.find({cx, cy});
+
+    if (pair == chunkMap.end()) return nullptr;
+    else return &pair->second;
 }
 
-uint8_t GameMap::get_terrain_elevation(const uint32_t x, const uint32_t y) const {
-    return terrain_elevation[y * size_x + x];
+GameMap::VoxelID* GameMap::get_voxel(Int3 pos) {
+    const int x = std::get<0>(pos);
+    const int y = std::get<1>(pos);
+    const int z = std::get<2>(pos);
+
+    // finding the chunk
+    auto chunk = get_chunk({x, y});
+    if (chunk == nullptr) return nullptr;
+
+    // getting the voxel inside the chunk
+    Int3 chunk_pos = {
+        floormod(x, CHUNK_SIZE),
+        floormod(y, CHUNK_SIZE),
+        floormod(z, CHUNK_SIZE),
+    };
+    return get_chunk_voxel(*chunk, chunk_pos);
 }
 
-VOXEL_TYPE GameMap::get_terrain_type(const uint32_t x, const uint32_t y) const {
-    return terrain_types[y * size_x + x];
+GameMap::VoxelID* GameMap::get_chunk_voxel(VoxelChunk& chunk, const Int3 pos) {
+    return &chunk[std::get<0>(pos)
+        + std::get<1>(pos) * CHUNK_SIZE
+        + std::get<2>(pos) * CHUNK_SIZE * CHUNK_SIZE];
 }
