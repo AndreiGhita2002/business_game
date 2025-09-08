@@ -10,7 +10,7 @@
 
 // REMINDER: Z goes UP/DOWN
 
-class GameMap {
+class VoxelMap {
 
 public:
     #define CHUNK_SIZE 16
@@ -24,8 +24,8 @@ public:
     std::map<VoxelID, Color> voxelColourMap;
     std::map<Int2, VoxelChunk> chunkMap;
 
-    GameMap(uint32_t size_x, uint32_t size_y);
-    ~GameMap();
+    VoxelMap(uint32_t size_x, uint32_t size_y);
+    ~VoxelMap();
 
     VoxelChunk* get_chunk(Int2 pos);
     VoxelID* get_voxel(Int3 pos);

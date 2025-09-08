@@ -2,10 +2,10 @@
 // Created by Andrei Ghita on 01.09.2025.
 //
 
-#include "gameMap.hpp"
+#include "VoxelMap.hpp"
 #include "PerlinNoise.hpp"
 
-GameMap::GameMap(const uint32_t size_x, const uint32_t size_y) {
+VoxelMap::VoxelMap(const uint32_t size_x, const uint32_t size_y) {
     this->size_x = size_x;
     this->size_y = size_y;
     this->chunks_x = size_x / 16 + (size_x % 16 ? 1 : 0);
@@ -46,9 +46,9 @@ GameMap::GameMap(const uint32_t size_x, const uint32_t size_y) {
     }
 }
 
-GameMap::~GameMap() {}
+VoxelMap::~VoxelMap() {}
 
-GameMap::VoxelChunk* GameMap::get_chunk(Int2 pos) {
+VoxelMap::VoxelChunk* VoxelMap::get_chunk(Int2 pos) {
     // finding the chunk
     const int cx = floordiv(std::get<0>(pos), CHUNK_SIZE);
     const int cy = floordiv(std::get<1>(pos), CHUNK_SIZE);
@@ -59,7 +59,7 @@ GameMap::VoxelChunk* GameMap::get_chunk(Int2 pos) {
     else return &pair->second;
 }
 
-GameMap::VoxelID* GameMap::get_voxel(Int3 pos) {
+VoxelMap::VoxelID* VoxelMap::get_voxel(Int3 pos) {
     const int x = std::get<0>(pos);
     const int y = std::get<1>(pos);
     const int z = std::get<2>(pos);
@@ -77,7 +77,7 @@ GameMap::VoxelID* GameMap::get_voxel(Int3 pos) {
     return get_chunk_voxel(*chunk, chunk_pos);
 }
 
-GameMap::VoxelID* GameMap::get_chunk_voxel(VoxelChunk& chunk, const Int3 pos) {
+VoxelMap::VoxelID* VoxelMap::get_chunk_voxel(VoxelChunk& chunk, const Int3 pos) {
     return &chunk[std::get<0>(pos)
         + std::get<1>(pos) * CHUNK_SIZE
         + std::get<2>(pos) * CHUNK_SIZE * CHUNK_SIZE];

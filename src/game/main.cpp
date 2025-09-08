@@ -22,7 +22,7 @@ void global::init() {
             0
         },
     };
-    game_map = new GameMap(128, 128);
+    game_map = new VoxelMap(128, 128);
 }
 
 void global::shutdown() {
@@ -120,7 +120,7 @@ void global::mainLoop() {
                         auto pv = game_map->get_voxel({ix, iy, iz});
                         if (!pv) continue; // voxel is not allocated
 
-                        GameMap::VoxelID v = *pv;
+                        VoxelMap::VoxelID v = *pv;
                         if (v == 0) continue; // voxel is air
 
                         Vector3 pos = {

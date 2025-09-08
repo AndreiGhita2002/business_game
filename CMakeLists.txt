@@ -37,8 +37,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_executable(${PROJECT_NAME}
         src/game/main.cpp
         src/game/main.hpp
-        src/game/gameMap.cpp
-        src/game/gameMap.hpp
+        src/game/voxelMap.cpp
+        src/game/voxelMap.hpp
         includes/PerlinNoise.hpp
 )
 
