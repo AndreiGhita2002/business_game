@@ -19,7 +19,7 @@ VoxelMap::VoxelMap(const uint32_t size_x, const uint32_t size_y) {
     this->chunkMap = std::map<Int2, VoxelChunk>();
     for (int ix = 0; ix < chunks_x; ++ix) {
         for (int iy = 0; iy < chunks_y; ++iy) {
-            chunkMap[{iy, ix}] = VoxelChunk{};
+            chunkMap[Int2(ix, iy)] = VoxelChunk{};
         }
     }
 
@@ -40,7 +40,7 @@ VoxelMap::VoxelMap(const uint32_t size_x, const uint32_t size_y) {
 
         for (int j = 0; j <= height; j++) {
             VoxelID voxel_type = j < 3 ? 1 : 2;
-            auto v = get_voxel({ix, iy, j});
+            auto v = get_voxel(Int3(ix, iy, j));
             *v = voxel_type;
         }
     }
@@ -50,8 +50,8 @@ VoxelMap::~VoxelMap() {}
 
 VoxelMap::VoxelChunk* VoxelMap::get_chunk(Int2 pos) {
     // finding the chunk
-    const int cx = floordiv(std::get<0>(pos), CHUNK_SIZE);
-    const int cy = floordiv(std::get<1>(pos), CHUNK_SIZE);
+    const int cx = floordiv(pos.x, CHUNK_SIZE);
+    const int cy = floordiv(pos.y, CHUNK_SIZE);
 
     auto pair = chunkMap.find({cx, cy});
 
@@ -60,25 +60,21 @@ VoxelMap::VoxelChunk* VoxelMap::get_chunk(Int2 pos) {
 }
 
 VoxelMap::VoxelID* VoxelMap::get_voxel(Int3 pos) {
-    const int x = std::get<0>(pos);
-    const int y = std::get<1>(pos);
-    const int z = std::get<2>(pos);
-
     // finding the chunk
-    auto chunk = get_chunk({x, y});
+    auto chunk = get_chunk({pos.x, pos.y});
     if (chunk == nullptr) return nullptr;
 
     // getting the voxel inside the chunk
     Int3 chunk_pos = {
-        floormod(x, CHUNK_SIZE),
-        floormod(y, CHUNK_SIZE),
-        floormod(z, CHUNK_SIZE),
+        floormod(pos.x, CHUNK_SIZE),
+        floormod(pos.y, CHUNK_SIZE),
+        floormod(pos.z, CHUNK_SIZE),
     };
     return get_chunk_voxel(*chunk, chunk_pos);
 }
 
 VoxelMap::VoxelID* VoxelMap::get_chunk_voxel(VoxelChunk& chunk, const Int3 pos) {
-    return &chunk[std::get<0>(pos)
-        + std::get<1>(pos) * CHUNK_SIZE
-        + std::get<2>(pos) * CHUNK_SIZE * CHUNK_SIZE];
+    return &chunk[pos.x
+        + pos.y * CHUNK_SIZE
+        + pos.z * CHUNK_SIZE * CHUNK_SIZE];
 }

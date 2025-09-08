@@ -10,14 +10,46 @@
 
 // REMINDER: Z goes UP/DOWN
 
+struct Int2 {
+    int x;
+    int y;
+
+    bool operator<(const Int2& other) const noexcept {
+        if (x < other.x) return true;
+        if (x > other.x) return false;
+        return y < other.y;
+    }
+
+    bool operator==(const Int2& other) const noexcept {
+        return x == other.x && y == other.y;
+    }
+};
+
+struct Int3 {
+    int x;
+    int y;
+    int z;
+
+    bool operator<(const Int3& other) const noexcept {
+        if (x < other.x) return true;
+        if (x > other.x) return false;
+        if (y < other.y) return true;
+        if (y > other.y) return false;
+        return z < other.z;
+    }
+
+    bool operator==(const Int3& other) const noexcept {
+        return x == other.x && y == other.y && z == other.z;
+    }
+
+};
+
 class VoxelMap {
 
 public:
     #define CHUNK_SIZE 16
     using VoxelID = uint8_t;
     using VoxelChunk = std::array<VoxelID,CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE>;
-    using Int2 = std::pair<int,int>;
-    using Int3 = std::tuple<int,int,int>;
 
     uint32_t size_x, size_y;
     uint32_t chunks_x, chunks_y;
