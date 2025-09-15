@@ -24,12 +24,15 @@ void global::init() {
         },
     };
     game_map = new VoxelMap(128, 128);
-    global::model = static_cast<Model *>(malloc(sizeof(Model)));
+    chunk_models = std::map<Int2, Model>();
 }
 
 void global::shutdown() {
+    for (auto it = chunk_models.begin(); it != chunk_models.end(); ++it) {
+        UnloadModel(it->second);
+    }
+    chunk_models.clear();
     delete game_map;
-    UnloadModel(*model);
     raylib::Window::Close();
 }
 
@@ -113,8 +116,13 @@ void global::updateVoxelMesh() {
         if (game_map->chunkWasUpdated[chunk_pos]) {
             VoxelChunk* chunk = game_map->get_chunk(chunk_pos);
 
-            Mesh mesh = build_chunk_mesh(*chunk, Vector3{0, 0, 0}, 1.0f);
-            *global::model = LoadModelFromMesh(mesh);
+            auto chunkOrigin = Vector3{
+                static_cast<float>(chunk_pos.x),
+                0.0,
+                static_cast<float>(chunk_pos.y)};
+            auto meshes = build_chunk_mesh(*chunk, chunkOrigin, 1.0f);
+            auto model = build_chunk_model(meshes, game_map->voxelColourMap);
+            chunk_models[chunk_pos] = model;
 
             game_map->chunkWasUpdated[chunk_pos] = false;
         }
@@ -136,8 +144,8 @@ void global::mainLoop() {
         BeginMode3D(camera);
         {
             // Only draws chunk 0,0
-            DrawModel(*global::model, {0,0,0}, 1.0f, GREEN);
-            DrawModelWires(*global::model, {0,0,0}, 1.0f, DARKGRAY);
+            DrawModel(chunk_models[Int2{0, 0}], {0,0,0}, 1.0f, WHITE);
+            DrawModelWires(chunk_models[Int2{0, 0}], {0,0,0}, 1.0f, DARKGRAY);
         }
         EndMode3D();
     }

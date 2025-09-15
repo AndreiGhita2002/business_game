@@ -10,7 +10,7 @@
 namespace global {
     inline raylib::Camera camera;
     inline VoxelMap* game_map;
-    inline Model* model;
+    inline std::map<Int2, Model> chunk_models;
 
     static void init();
     static void mainLoop();
