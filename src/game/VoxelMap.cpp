@@ -20,6 +20,7 @@ VoxelMap::VoxelMap(const uint32_t size_x, const uint32_t size_y) {
     for (int ix = 0; ix < chunks_x; ++ix) {
         for (int iy = 0; iy < chunks_y; ++iy) {
             chunkMap[Int2(ix, iy)] = VoxelChunk{};
+            chunkWasUpdated[Int2(ix, iy)] = true;
         }
     }
 
@@ -48,7 +49,7 @@ VoxelMap::VoxelMap(const uint32_t size_x, const uint32_t size_y) {
 
 VoxelMap::~VoxelMap() {}
 
-VoxelMap::VoxelChunk* VoxelMap::get_chunk(Int2 pos) {
+VoxelChunk* VoxelMap::get_chunk(Int2 pos) {
     // finding the chunk
     const int cx = floordiv(pos.x, CHUNK_SIZE);
     const int cy = floordiv(pos.y, CHUNK_SIZE);
@@ -59,7 +60,7 @@ VoxelMap::VoxelChunk* VoxelMap::get_chunk(Int2 pos) {
     else return &pair->second;
 }
 
-VoxelMap::VoxelID* VoxelMap::get_voxel(Int3 pos) {
+VoxelID* VoxelMap::get_voxel(Int3 pos) {
     // finding the chunk
     auto chunk = get_chunk({pos.x, pos.y});
     if (chunk == nullptr) return nullptr;
@@ -73,7 +74,7 @@ VoxelMap::VoxelID* VoxelMap::get_voxel(Int3 pos) {
     return get_chunk_voxel(*chunk, chunk_pos);
 }
 
-VoxelMap::VoxelID* VoxelMap::get_chunk_voxel(VoxelChunk& chunk, const Int3 pos) {
+VoxelID* VoxelMap::get_chunk_voxel(VoxelChunk& chunk, const Int3 pos) {
     return &chunk[pos.x
         + pos.y * CHUNK_SIZE
         + pos.z * CHUNK_SIZE * CHUNK_SIZE];

@@ -5,10 +5,13 @@
 #ifndef BUSINESS_GAME_GAMEMAP_HPP
 #define BUSINESS_GAME_GAMEMAP_HPP
 #include <Color.hpp>
-#include <cstdint>
 #include <map>
 
 // REMINDER: Z goes UP/DOWN
+
+#define CHUNK_SIZE 16
+using VoxelID = uint8_t;
+using VoxelChunk = std::array<VoxelID,CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE>;
 
 struct Int2 {
     int x;
@@ -47,14 +50,11 @@ struct Int3 {
 class VoxelMap {
 
 public:
-    #define CHUNK_SIZE 16
-    using VoxelID = uint8_t;
-    using VoxelChunk = std::array<VoxelID,CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE>;
-
     uint32_t size_x, size_y;
     uint32_t chunks_x, chunks_y;
     std::map<VoxelID, Color> voxelColourMap;
     std::map<Int2, VoxelChunk> chunkMap;
+    std::map<Int2, bool> chunkWasUpdated;
 
     VoxelMap(uint32_t size_x, uint32_t size_y);
     ~VoxelMap();

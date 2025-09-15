@@ -40,6 +40,8 @@ add_executable(${PROJECT_NAME}
         src/game/voxelMap.cpp
         src/game/voxelMap.hpp
         includes/PerlinNoise.hpp
+        src/game/VoxelMesher.cpp
+        src/game/VoxelMesher.hpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/includes)

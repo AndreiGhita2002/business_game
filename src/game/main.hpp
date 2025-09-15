@@ -10,12 +10,14 @@
 namespace global {
     inline raylib::Camera camera;
     inline VoxelMap* game_map;
+    inline Model* model;
 
     static void init();
     static void mainLoop();
     static void shutdown();
 
     static void updateCamera();
+    static void updateVoxelMesh();
 }
 
 

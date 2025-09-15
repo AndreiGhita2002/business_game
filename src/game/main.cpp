@@ -4,6 +4,7 @@
 
 #include "main.hpp"
 #include "raylib-cpp.hpp"
+#include "VoxelMesher.hpp"
 
 #if defined(PLATFORM_WEB)
     #include <emscripten/emscripten.h>
@@ -23,10 +24,12 @@ void global::init() {
         },
     };
     game_map = new VoxelMap(128, 128);
+    global::model = static_cast<Model *>(malloc(sizeof(Model)));
 }
 
 void global::shutdown() {
     delete game_map;
+    UnloadModel(*model);
     raylib::Window::Close();
 }
 
@@ -100,6 +103,23 @@ void global::updateCamera() {
     }
 }
 
+void global::updateVoxelMesh() {
+    // Only updates chunk 0,0
+    //todo do other chunks
+    std::vector<Int2> chunks;
+    chunks.emplace_back(Int2{0, 0});
+
+    for (Int2 chunk_pos : chunks) {
+        if (game_map->chunkWasUpdated[chunk_pos]) {
+            VoxelChunk* chunk = game_map->get_chunk(chunk_pos);
+
+            Mesh mesh = build_chunk_mesh(*chunk, Vector3{0, 0, 0}, 1.0f);
+            *global::model = LoadModelFromMesh(mesh);
+
+            game_map->chunkWasUpdated[chunk_pos] = false;
+        }
+    }
+}
 
 void global::mainLoop() {
     const Vector3 boxPos = { -(game_map->size_x / 2.0f), 0.0f, -(game_map->size_y / 2.0f) };
@@ -107,6 +127,7 @@ void global::mainLoop() {
 
     // Update
     updateCamera();
+    updateVoxelMesh();
 
     // Draw
     BeginDrawing();
@@ -114,26 +135,9 @@ void global::mainLoop() {
         ClearBackground(RAYWHITE);
         BeginMode3D(camera);
         {
-            for (auto iy = 0; iy < game_map->size_y; ++iy) {
-                for (auto ix = 0; ix < game_map->size_x; ++ix) {
-                    for (auto iz = 0; iz < CHUNK_SIZE; ++iz) {
-                        auto pv = game_map->get_voxel({ix, iy, iz});
-                        if (!pv) continue; // voxel is not allocated
-
-                        VoxelMap::VoxelID v = *pv;
-                        if (v == 0) continue; // voxel is air
-
-                        Vector3 pos = {
-                            boxPos.x + static_cast<float>(ix),
-                            boxPos.y + static_cast<float>(iz),
-                            boxPos.z + static_cast<float>(iy),
-                        };
-                        auto col = game_map->voxelColourMap.at(v);
-                        DrawCube(pos, boxSize.x, boxSize.y, boxSize.z, col);
-                        DrawCubeWires(pos, boxSize.x, boxSize.y, boxSize.z, BLACK);
-                    }
-                }
-            }
+            // Only draws chunk 0,0
+            DrawModel(*global::model, {0,0,0}, 1.0f, GREEN);
+            DrawModelWires(*global::model, {0,0,0}, 1.0f, DARKGRAY);
         }
         EndMode3D();
     }
