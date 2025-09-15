@@ -11,6 +11,21 @@
 #endif
 
 
+Vector3 apply_transform(Vector3 v, Transform t) {
+    // Scale
+    Vector3 scaled = {
+        v.x * t.scale.x,
+        v.y * t.scale.y,
+        v.z * t.scale.z
+    };
+
+    // Rotate
+    Vector3 rotated = Vector3RotateByQuaternion(scaled, t.rotation);
+
+    // Translate
+    return Vector3Add(rotated, t.translation);
+}
+
 void global::init() {
     // window = raylib::Window(800, 450, "business game");
     raylib::Window::Init(1600, 900, "business game");
@@ -107,19 +122,18 @@ void global::updateCamera() {
 }
 
 void global::updateVoxelMesh() {
-    // Only updates chunk 0,0
-    //todo do other chunks
-    std::vector<Int2> chunks;
-    chunks.emplace_back(Int2{0, 0});
+    for (auto it = game_map->chunkMap.begin(); it != game_map->chunkMap.end(); ++it) {
+        auto chunk_pos = it->first;
+        auto chunk = &it->second;
 
-    for (Int2 chunk_pos : chunks) {
+        // todo check if chunk is within range of the camera
+
         if (game_map->chunkWasUpdated[chunk_pos]) {
-            VoxelChunk* chunk = game_map->get_chunk(chunk_pos);
-
             auto chunkOrigin = Vector3{
-                static_cast<float>(chunk_pos.x),
+                static_cast<float>(chunk_pos.x) - 0.5f,
                 0.0,
-                static_cast<float>(chunk_pos.y)};
+                static_cast<float>(chunk_pos.y) - 0.5f
+            };
             auto meshes = build_chunk_mesh(*chunk, chunkOrigin, 1.0f);
             auto model = build_chunk_model(meshes, game_map->voxelColourMap);
             chunk_models[chunk_pos] = model;
@@ -130,9 +144,6 @@ void global::updateVoxelMesh() {
 }
 
 void global::mainLoop() {
-    const Vector3 boxPos = { -(game_map->size_x / 2.0f), 0.0f, -(game_map->size_y / 2.0f) };
-    const Vector3 boxSize = { 1.0f, 1.0f, 1.0f };
-
     // Update
     updateCamera();
     updateVoxelMesh();
@@ -143,9 +154,20 @@ void global::mainLoop() {
         ClearBackground(RAYWHITE);
         BeginMode3D(camera);
         {
-            // Only draws chunk 0,0
-            DrawModel(chunk_models[Int2{0, 0}], {0,0,0}, 1.0f, WHITE);
-            DrawModelWires(chunk_models[Int2{0, 0}], {0,0,0}, 1.0f, DARKGRAY);
+            for (auto it = chunk_models.begin(); it != chunk_models.end(); ++it) {
+                auto chunk_pos = Vector3{
+                    static_cast<float>(it->first.x) * (CHUNK_SIZE - 1),
+                    0.0,
+                    static_cast<float>(it->first.y) * (CHUNK_SIZE - 1)
+                };
+                Vector3 world_pos = apply_transform(chunk_pos, game_map->world_transform);
+                auto model = it->second;
+
+                DrawModel(model, world_pos, 1.0f, WHITE);
+                DrawModelWires(model, world_pos, 1.0f, DARKGRAY);
+            }
+
+            DrawCube(Vector3{0.0, 5.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);
         }
         EndMode3D();
     }

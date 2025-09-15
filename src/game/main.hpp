@@ -20,5 +20,6 @@ namespace global {
     static void updateVoxelMesh();
 }
 
+Vector3 apply_transform(Vector3 v, Transform t);
 
 #endif //BUSINESS_GAME_MAIN_HPP

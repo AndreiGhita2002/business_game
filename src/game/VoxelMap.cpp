@@ -11,6 +11,12 @@ VoxelMap::VoxelMap(const uint32_t size_x, const uint32_t size_y) {
     this->chunks_x = size_x / 16 + (size_x % 16 ? 1 : 0);
     this->chunks_y = size_x / 16 + (size_x % 16 ? 1 : 0);
 
+    this->world_transform = Transform{
+        Vector3 {0.0, 0.0, 0.0},
+        Quaternion {0.0, 0.0, 0.0, 1.0},
+        Vector3 {1.0, 1.0, 1.0},
+    };
+
     this->voxelColourMap = std::map<VoxelID, Color>();
     voxelColourMap.insert(std::pair<VoxelID, Color>(0, RED)); // air, should not be seen
     voxelColourMap.insert(std::pair<VoxelID, Color>(1, BEIGE));

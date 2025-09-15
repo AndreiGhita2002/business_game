@@ -52,6 +52,7 @@ class VoxelMap {
 public:
     uint32_t size_x, size_y;
     uint32_t chunks_x, chunks_y;
+    Transform world_transform;
     std::map<VoxelID, Color> voxelColourMap;
     std::map<Int2, VoxelChunk> chunkMap;
     std::map<Int2, bool> chunkWasUpdated;
