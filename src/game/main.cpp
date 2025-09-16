@@ -153,24 +153,28 @@ void global::mainLoop() {
         {
             for (VoxelGrid* grid : voxel_grids) {
                 for (ModelInfo* model_info : grid->get_models()) {
+                    // Offset
+                    auto offset = Vector3Scale(model_info->transform.translation, voxel_scale);
+
                     // Rotation
                     auto axis = Vector3{};
                     auto angle = 0.0f;
                     QuaternionToAxisAngle(model_info->transform.rotation, &axis, &angle);
 
+                    // Scale
+                    auto scale = Vector3Scale(model_info->transform.scale, voxel_scale);
+
                     // Drawing the model
-                    DrawModelEx(model_info->model, model_info->transform.translation,
-                        axis, angle,
-                        model_info->transform.scale, WHITE);
+                    DrawModelEx(model_info->model, offset,
+                        axis, angle, scale, WHITE);
 
                     // Drawing wires
-                    DrawModelWiresEx(model_info->model, model_info->transform.translation,
-                        axis, angle,
-                        model_info->transform.scale, DARKGRAY);
+                    DrawModelWiresEx(model_info->model, offset,
+                        axis, angle, scale, DARKGRAY);
                 }
             }
 
-            DrawCube(Vector3{0.0, 5.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);
+            DrawCube(Vector3{0.0, 0.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);
         }
         EndMode3D();
     }
