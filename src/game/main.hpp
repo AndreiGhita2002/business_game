@@ -5,7 +5,7 @@
 #ifndef BUSINESS_GAME_MAIN_HPP
 #define BUSINESS_GAME_MAIN_HPP
 #include <Camera3D.hpp>
-#include "VoxelMap.hpp"
+#include "voxel/VoxelMap.hpp"
 
 namespace global {
     inline raylib::Camera camera;

@@ -2,7 +2,7 @@
 // Created by Andrei Ghita on 01.09.2025.
 //
 
-#include "VoxelMap.hpp"
+#include "voxel/VoxelMap.hpp"
 #include "PerlinNoise.hpp"
 
 VoxelMap::VoxelMap(const uint32_t size_x, const uint32_t size_y) {

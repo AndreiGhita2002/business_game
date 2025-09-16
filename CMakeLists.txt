@@ -37,14 +37,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_executable(${PROJECT_NAME}
         src/game/main.cpp
         src/game/main.hpp
-        src/game/voxelMap.cpp
-        src/game/voxelMap.hpp
         includes/PerlinNoise.hpp
-        src/game/VoxelMesher.cpp
-        src/game/VoxelMesher.hpp
+        src/voxel/voxelMap.cpp
+        src/voxel/voxelMap.hpp
+        src/voxel/VoxelMesher.cpp
+        src/voxel/VoxelMesher.hpp
 )
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/includes)
+target_include_directories(${PROJECT_NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/includes
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
 target_link_libraries(${PROJECT_NAME} PRIVATE raylib raylib_cpp)
 
 # macOS frameworks

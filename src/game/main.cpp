@@ -4,7 +4,7 @@
 
 #include "main.hpp"
 #include "raylib-cpp.hpp"
-#include "VoxelMesher.hpp"
+#include "voxel/VoxelMesher.hpp"
 
 #if defined(PLATFORM_WEB)
     #include <emscripten/emscripten.h>

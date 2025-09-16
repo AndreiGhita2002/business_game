@@ -2,7 +2,7 @@
 // Created by Andrei Ghita on 08.09.2025.
 //
 
-#include "VoxelMesher.hpp"
+#include "voxel/VoxelMesher.hpp"
 #include <raylib.h>
 #include <array>
 #include <unordered_map>
