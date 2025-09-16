@@ -33,6 +33,9 @@ struct Accum {
 
 std::vector<MaterialMesh>
 build_chunk_mesh(const VoxelChunk& chunk, Vector3 origin, float voxelSize) {
+    //TODO (optimisation)
+    // the chunk mesher could be massively improved if it was switched to a greedy algorithm
+
     // Neighbor directions in MAP space (x,y,z), and their normals in WORLD space
     struct Dir { int dx, dy, dz; Vector3 nWorld; };
     const Dir dirs[6] = {

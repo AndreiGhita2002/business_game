@@ -28,6 +28,7 @@ Vector3 apply_transform(const Vector3 v, const Transform &t) {
 }
 
 bool global::isInRenderDistance(const Vector3 v) {
+    // TODO (optimisation) this should be rewritten so that it doesn't use a sqrt operation
     return Vector3Distance(camera.position, v) <= render_distance
     || !limit_render_distance;
 }

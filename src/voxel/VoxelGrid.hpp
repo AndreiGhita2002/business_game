@@ -61,6 +61,11 @@ public:
     virtual Int2 get_size() = 0;
     virtual VoxelID* get_voxel(Int3 grid_pos) = 0;
     virtual void update_models() = 0;
+    //TODO (optimisation)
+    // this function could be improved by having it not create
+    // a new vector every time. Ideally, there should be a linked
+    // list where every node has an array of ModelInfos that are
+    // managed by their respective grid
     virtual std::vector<ModelInfo*> get_models() = 0;
 
     virtual ~VoxelGrid() = default;
