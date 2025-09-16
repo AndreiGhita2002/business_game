@@ -60,7 +60,6 @@ void global::init() {
 }
 
 void global::shutdown() {
-    delete game_map;
     raylib::Window::Close();
 }
 
