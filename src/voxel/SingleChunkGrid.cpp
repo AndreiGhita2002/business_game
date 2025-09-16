@@ -32,7 +32,7 @@ void SingleChunkGrid::update_models() {
             auto meshes = build_chunk_mesh(data, Vector3{0.0,0.0,0.0}, 1.0f);
             auto new_model = build_chunk_model(meshes, *voxel_colours);
 
-            model = ModelInfo{true, new_model, transform.translation};
+            model = ModelInfo{true, new_model, transform};
 
             was_updated = false;
         }

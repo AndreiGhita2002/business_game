@@ -50,7 +50,7 @@ struct Int3 {
 struct ModelInfo {
     bool do_render;
     Model model;
-    Vector3 offset;
+    Transform transform;
 };
 
 class VoxelGrid {

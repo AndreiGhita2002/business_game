@@ -50,6 +50,7 @@ void global::init() {
     *single_chunk_grid->get_voxel(Int3(2.0,0.0,0.0)) = 3;
     *single_chunk_grid->get_voxel(Int3(3.0,0.0,0.0)) = 3;
     single_chunk_grid->transform.translation = Vector3(-2.0f, 6.0f, -2.0f);
+    single_chunk_grid->transform.scale = Vector3(2.0f, 2.0f, 2.0f);
     single_chunk_grid->was_updated = true;
 }
 
@@ -146,14 +147,23 @@ void global::mainLoop() {
         {
             // Voxel Map
             for (ModelInfo* model_info : game_map->get_models()) {
-                DrawModel(model_info->model, model_info->offset, 1.0f, WHITE);
-                DrawModelWires(model_info->model, model_info->offset, 1.0f, DARKGRAY);
+                DrawModel(model_info->model, model_info->transform.translation, 1.0f, WHITE);
+                DrawModelWires(model_info->model, model_info->transform.translation, 1.0f, DARKGRAY);
             }
 
             // Single Chunk Grid
             if (auto model_info = single_chunk_grid->get_models().front()) {
-                DrawModel(model_info->model, model_info->offset, 1.0f, WHITE);
-                DrawModelWires(model_info->model, model_info->offset, 1.0f, DARKGRAY);
+
+                auto axis = Vector3{};
+                auto angle = 0.0f;
+                QuaternionToAxisAngle(model_info->transform.rotation, &axis, &angle);
+
+                DrawModelEx(model_info->model, model_info->transform.translation,
+                    axis, angle,
+                    model_info->transform.scale, WHITE);
+                DrawModelWiresEx(model_info->model, model_info->transform.translation,
+                    axis, angle,
+                    model_info->transform.scale, DARKGRAY);
             }
 
             DrawCube(Vector3{0.0, 5.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);

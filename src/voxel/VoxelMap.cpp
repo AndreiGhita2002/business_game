@@ -70,23 +70,23 @@ void VoxelMap::update_models() {
         auto chunk_model = chunk_models.find(chunk_pos);
 
         // calculating the position of the chunk in render space
-        auto offset = Vector3{
+        auto model_transform = transform;
+        model_transform.translation += Vector3{
             static_cast<float>(it->first.x) * (CHUNK_SIZE - 1),
             0.0,
             static_cast<float>(it->first.y) * (CHUNK_SIZE - 1)
         };
-        offset = apply_transform(offset, transform);
 
         // render distance check
         if (chunk_model != chunk_models.end() && global::limit_render_distance) {
-            chunk_model->second.do_render = global::isInRenderDistance(offset);
+            chunk_model->second.do_render = global::isInRenderDistance(model_transform.translation);
         }
 
         if (chunk_was_updated[chunk_pos]) {
             auto meshes = build_chunk_mesh(*chunk, Vector3{0.0,0.0,0.0}, 1.0f);
             auto new_model = build_chunk_model(meshes, *voxel_colours);
 
-            chunk_models[chunk_pos] = ModelInfo{true, new_model, offset};
+            chunk_models[chunk_pos] = ModelInfo{true, new_model, model_transform};
             chunk_was_updated[chunk_pos] = false;
         }
     }
