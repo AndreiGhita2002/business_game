@@ -4,77 +4,32 @@
 
 #ifndef BUSINESS_GAME_GAMEMAP_HPP
 #define BUSINESS_GAME_GAMEMAP_HPP
-#include <Color.hpp>
 #include <map>
+#include "voxel/VoxelGrid.hpp"
 
-// REMINDER: Z goes UP/DOWN
-
-#define CHUNK_SIZE 16
-using VoxelID = uint8_t;
-using VoxelChunk = std::array<VoxelID,CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE>;
-
-struct Int2 {
-    int x;
-    int y;
-
-    bool operator<(const Int2& other) const noexcept {
-        if (x < other.x) return true;
-        if (x > other.x) return false;
-        return y < other.y;
-    }
-
-    bool operator==(const Int2& other) const noexcept {
-        return x == other.x && y == other.y;
-    }
-};
-
-struct Int3 {
-    int x;
-    int y;
-    int z;
-
-    bool operator<(const Int3& other) const noexcept {
-        if (x < other.x) return true;
-        if (x > other.x) return false;
-        if (y < other.y) return true;
-        if (y > other.y) return false;
-        return z < other.z;
-    }
-
-    bool operator==(const Int3& other) const noexcept {
-        return x == other.x && y == other.y && z == other.z;
-    }
-
-};
-
-class VoxelMap {
+class VoxelMap final : public VoxelGrid {
 
 public:
-    uint32_t size_x, size_y;
-    uint32_t chunks_x, chunks_y;
-    Transform world_transform;
-    std::map<VoxelID, Color> voxelColourMap;
-    std::map<Int2, VoxelChunk> chunkMap;
-    std::map<Int2, bool> chunkWasUpdated;
+    std::map<Int2, VoxelChunk> chunks;
+    std::map<Int2, bool> chunk_was_updated;
+    std::map<Int2, ModelInfo> chunk_models;
 
     VoxelMap(uint32_t size_x, uint32_t size_y);
-    ~VoxelMap();
+    ~VoxelMap() override;
 
+    VoxelID* get_voxel(Int3 pos) override;
+    Int2 get_size() override;
+    void update_models(Vector3 camera_pos) override;
+    std::vector<ModelInfo*> get_models() override;
+
+    Int2 get_chunk_count() const;
     VoxelChunk* get_chunk(Int2 pos);
-    VoxelID* get_voxel(Int3 pos);
+
     static VoxelID* get_chunk_voxel(VoxelChunk& chunk, Int3 pos);
 
 private:
-    // helper: floor division/modulo that work for negatives
-    static int floordiv(int a, int b) {
-        int q = a / b;
-        int r = a % b;
-        return (r && ((r > 0) != (b > 0))) ? (q - 1) : q;
-    }
-    static int floormod(int a, int b) {
-        int m = a % b;
-        return (m < 0) ? (m + (b > 0 ? b : -b)) : m;
-    }
+    Int2 size;
+    Int2 chunk_count;
 };
 
 

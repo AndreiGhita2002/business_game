@@ -10,7 +10,8 @@
 namespace global {
     inline raylib::Camera camera;
     inline VoxelMap* game_map;
-    inline std::map<Int2, Model> chunk_models;
+    inline float render_distance = 128.0f;
+    inline bool limit_render_distance = false;
 
     static void init();
     static void mainLoop();

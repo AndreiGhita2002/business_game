@@ -39,14 +39,9 @@ void global::init() {
         },
     };
     game_map = new VoxelMap(128, 128);
-    chunk_models = std::map<Int2, Model>();
 }
 
 void global::shutdown() {
-    for (auto it = chunk_models.begin(); it != chunk_models.end(); ++it) {
-        UnloadModel(it->second);
-    }
-    chunk_models.clear();
     delete game_map;
     raylib::Window::Close();
 }
@@ -122,25 +117,7 @@ void global::updateCamera() {
 }
 
 void global::updateVoxelMesh() {
-    for (auto it = game_map->chunkMap.begin(); it != game_map->chunkMap.end(); ++it) {
-        auto chunk_pos = it->first;
-        auto chunk = &it->second;
-
-        // todo check if chunk is within range of the camera
-
-        if (game_map->chunkWasUpdated[chunk_pos]) {
-            auto chunkOrigin = Vector3{
-                static_cast<float>(chunk_pos.x) - 0.5f,
-                0.0,
-                static_cast<float>(chunk_pos.y) - 0.5f
-            };
-            auto meshes = build_chunk_mesh(*chunk, chunkOrigin, 1.0f);
-            auto model = build_chunk_model(meshes, game_map->voxelColourMap);
-            chunk_models[chunk_pos] = model;
-
-            game_map->chunkWasUpdated[chunk_pos] = false;
-        }
-    }
+    game_map->update_models(camera.position);
 }
 
 void global::mainLoop() {
@@ -154,17 +131,9 @@ void global::mainLoop() {
         ClearBackground(RAYWHITE);
         BeginMode3D(camera);
         {
-            for (auto it = chunk_models.begin(); it != chunk_models.end(); ++it) {
-                auto chunk_pos = Vector3{
-                    static_cast<float>(it->first.x) * (CHUNK_SIZE - 1),
-                    0.0,
-                    static_cast<float>(it->first.y) * (CHUNK_SIZE - 1)
-                };
-                Vector3 world_pos = apply_transform(chunk_pos, game_map->world_transform);
-                auto model = it->second;
-
-                DrawModel(model, world_pos, 1.0f, WHITE);
-                DrawModelWires(model, world_pos, 1.0f, DARKGRAY);
+            for (ModelInfo* model_info : game_map->get_models()) {
+                DrawModel(model_info->model, model_info->offset, 1.0f, WHITE);
+                DrawModelWires(model_info->model, model_info->offset, 1.0f, DARKGRAY);
             }
 
             DrawCube(Vector3{0.0, 5.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);

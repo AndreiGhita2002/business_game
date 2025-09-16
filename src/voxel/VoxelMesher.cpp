@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cstring> // memcpy
+#include <raymath.h>
 #include "VoxelMap.hpp"
 
 
@@ -183,7 +184,7 @@ Model build_chunk_model(const std::vector<MaterialMesh> &mats, const std::map<Vo
     model.materials = (Material*)MemAlloc(sizeof(Material) * n);
     for (int i = 0; i < n; ++i) {
         model.materials[i] = LoadMaterialDefault();
-        Color c = DARKGRAY;
+        Color c = PURPLE;
         if (auto it = voxelColourMap.find(mats[i].id); it != voxelColourMap.end())
             c = it->second;
 
