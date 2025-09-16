@@ -19,7 +19,7 @@ public:
 
     VoxelID* get_voxel(Int3 pos) override;
     Int2 get_size() override;
-    void update_models(Vector3 camera_pos) override;
+    void update_models() override;
     std::vector<ModelInfo*> get_models() override;
 
     Int2 get_chunk_count() const;

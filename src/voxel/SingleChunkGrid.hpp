@@ -8,6 +8,7 @@
 
 class SingleChunkGrid final : VoxelGrid {
 public:
+    Transform transform;
     VoxelChunk data;
     bool was_updated;
 
@@ -15,10 +16,11 @@ public:
 
     Int2 get_size() override;
     VoxelID *get_voxel(Int3 grid_pos) override;
-    void update_models(Vector3 camera_pos) override;
+    void update_models() override;
     std::vector<ModelInfo*> get_models() override;
 private:
     Int2 size;
+    std::optional<ModelInfo> model;
 };
 
 

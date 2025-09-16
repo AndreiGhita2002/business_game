@@ -11,7 +11,7 @@
 #endif
 
 
-Vector3 apply_transform(Vector3 v, Transform t) {
+Vector3 apply_transform(const Vector3 v, const Transform &t) {
     // Scale
     Vector3 scaled = {
         v.x * t.scale.x,
@@ -26,8 +26,12 @@ Vector3 apply_transform(Vector3 v, Transform t) {
     return Vector3Add(rotated, t.translation);
 }
 
+bool global::isInRenderDistance(const Vector3 v) {
+    return Vector3Distance(camera.position, v) <= render_distance
+    || !limit_render_distance;
+}
+
 void global::init() {
-    // window = raylib::Window(800, 450, "business game");
     raylib::Window::Init(1600, 900, "business game");
     camera = {
         {
@@ -39,6 +43,14 @@ void global::init() {
         },
     };
     game_map = new VoxelMap(128, 128);
+
+    single_chunk_grid = new SingleChunkGrid(game_map->voxel_colours);
+    *single_chunk_grid->get_voxel(Int3(0.0,0.0,0.0)) = 3;
+    *single_chunk_grid->get_voxel(Int3(1.0,0.0,0.0)) = 3;
+    *single_chunk_grid->get_voxel(Int3(2.0,0.0,0.0)) = 3;
+    *single_chunk_grid->get_voxel(Int3(3.0,0.0,0.0)) = 3;
+    single_chunk_grid->transform.translation = Vector3(-2.0f, 6.0f, -2.0f);
+    single_chunk_grid->was_updated = true;
 }
 
 void global::shutdown() {
@@ -117,7 +129,8 @@ void global::updateCamera() {
 }
 
 void global::updateVoxelMesh() {
-    game_map->update_models(camera.position);
+    game_map->update_models();
+    single_chunk_grid->update_models();
 }
 
 void global::mainLoop() {
@@ -131,7 +144,14 @@ void global::mainLoop() {
         ClearBackground(RAYWHITE);
         BeginMode3D(camera);
         {
+            // Voxel Map
             for (ModelInfo* model_info : game_map->get_models()) {
+                DrawModel(model_info->model, model_info->offset, 1.0f, WHITE);
+                DrawModelWires(model_info->model, model_info->offset, 1.0f, DARKGRAY);
+            }
+
+            // Single Chunk Grid
+            if (auto model_info = single_chunk_grid->get_models().front()) {
                 DrawModel(model_info->model, model_info->offset, 1.0f, WHITE);
                 DrawModelWires(model_info->model, model_info->offset, 1.0f, DARKGRAY);
             }

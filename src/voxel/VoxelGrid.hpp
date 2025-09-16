@@ -60,7 +60,7 @@ public:
 
     virtual Int2 get_size() = 0;
     virtual VoxelID* get_voxel(Int3 grid_pos) = 0;
-    virtual void update_models(Vector3 camera_pos) = 0;
+    virtual void update_models() = 0;
     virtual std::vector<ModelInfo*> get_models() = 0;
 
     virtual ~VoxelGrid() = default;

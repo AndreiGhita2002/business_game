@@ -23,6 +23,7 @@ VoxelMap::VoxelMap(const uint32_t size_x, const uint32_t size_y) {
     colorMap->insert(std::pair<VoxelID, Color>(0, RED)); // air, should not be seen
     colorMap->insert(std::pair<VoxelID, Color>(1, BEIGE));
     colorMap->insert(std::pair<VoxelID, Color>(2, DARKGREEN));
+    colorMap->insert(std::pair<VoxelID, Color>(3, YELLOW));
 
     this->chunks = std::map<Int2, VoxelChunk>();
     for (int ix = 0; ix < chunk_count.x; ++ix) {
@@ -62,7 +63,7 @@ VoxelMap::~VoxelMap() {
     chunk_models.clear();
 }
 
-void VoxelMap::update_models(const Vector3 camera_pos) {
+void VoxelMap::update_models() {
     for (auto it = chunks.begin(); it != chunks.end(); ++it) {
         auto chunk_pos = it->first;
         auto chunk = &it->second;
@@ -78,7 +79,7 @@ void VoxelMap::update_models(const Vector3 camera_pos) {
 
         // render distance check
         if (chunk_model != chunk_models.end() && global::limit_render_distance) {
-            chunk_model->second.do_render = Vector3Distance(camera_pos, offset) <= global::render_distance;
+            chunk_model->second.do_render = global::isInRenderDistance(offset);
         }
 
         if (chunk_was_updated[chunk_pos]) {
