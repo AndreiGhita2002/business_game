@@ -5,16 +5,18 @@
 #ifndef BUSINESS_GAME_MAIN_HPP
 #define BUSINESS_GAME_MAIN_HPP
 #include <Camera3D.hpp>
-
-#include "voxel/SingleChunkGrid.hpp"
+#include <vector>
 #include "voxel/VoxelMap.hpp"
 
 namespace global {
     inline raylib::Camera camera;
-    inline VoxelMap* game_map;
-    inline SingleChunkGrid* single_chunk_grid;
+
+    // inline SingleChunkGrid* single_chunk_grid;
     inline float render_distance = 128.0f;
     inline bool limit_render_distance = false;
+
+    inline std::vector<VoxelGrid*> voxel_grids;
+    inline VoxelMap* game_map;
 
     // Main Function, only called inside main
     static void init();

@@ -5,6 +5,7 @@
 #include "main.hpp"
 #include "raylib-cpp.hpp"
 #include "voxel/VoxelMesher.hpp"
+#include "voxel/SingleChunkGrid.hpp"
 
 #if defined(PLATFORM_WEB)
     #include <emscripten/emscripten.h>
@@ -42,9 +43,12 @@ void global::init() {
             0
         },
     };
-    game_map = new VoxelMap(128, 128);
+    voxel_grids = std::vector<VoxelGrid*>();
 
-    single_chunk_grid = new SingleChunkGrid(game_map->voxel_colours);
+    game_map = new VoxelMap(128, 128);
+    voxel_grids.emplace_back(game_map);
+
+    auto single_chunk_grid = new SingleChunkGrid(game_map->voxel_colours);
     *single_chunk_grid->get_voxel(Int3(0.0,0.0,0.0)) = 3;
     *single_chunk_grid->get_voxel(Int3(1.0,0.0,0.0)) = 3;
     *single_chunk_grid->get_voxel(Int3(2.0,0.0,0.0)) = 3;
@@ -52,6 +56,7 @@ void global::init() {
     single_chunk_grid->transform.translation = Vector3(-2.0f, 6.0f, -2.0f);
     single_chunk_grid->transform.scale = Vector3(2.0f, 2.0f, 2.0f);
     single_chunk_grid->was_updated = true;
+    voxel_grids.emplace_back(single_chunk_grid);
 }
 
 void global::shutdown() {
@@ -130,8 +135,9 @@ void global::updateCamera() {
 }
 
 void global::updateVoxelMesh() {
-    game_map->update_models();
-    single_chunk_grid->update_models();
+    for (VoxelGrid* grid : voxel_grids) {
+        grid->update_models();
+    }
 }
 
 void global::mainLoop() {
@@ -145,25 +151,23 @@ void global::mainLoop() {
         ClearBackground(RAYWHITE);
         BeginMode3D(camera);
         {
-            // Voxel Map
-            for (ModelInfo* model_info : game_map->get_models()) {
-                DrawModel(model_info->model, model_info->transform.translation, 1.0f, WHITE);
-                DrawModelWires(model_info->model, model_info->transform.translation, 1.0f, DARKGRAY);
-            }
+            for (VoxelGrid* grid : voxel_grids) {
+                for (ModelInfo* model_info : grid->get_models()) {
+                    // Rotation
+                    auto axis = Vector3{};
+                    auto angle = 0.0f;
+                    QuaternionToAxisAngle(model_info->transform.rotation, &axis, &angle);
 
-            // Single Chunk Grid
-            if (auto model_info = single_chunk_grid->get_models().front()) {
+                    // Drawing the model
+                    DrawModelEx(model_info->model, model_info->transform.translation,
+                        axis, angle,
+                        model_info->transform.scale, WHITE);
 
-                auto axis = Vector3{};
-                auto angle = 0.0f;
-                QuaternionToAxisAngle(model_info->transform.rotation, &axis, &angle);
-
-                DrawModelEx(model_info->model, model_info->transform.translation,
-                    axis, angle,
-                    model_info->transform.scale, WHITE);
-                DrawModelWiresEx(model_info->model, model_info->transform.translation,
-                    axis, angle,
-                    model_info->transform.scale, DARKGRAY);
+                    // Drawing wires
+                    DrawModelWiresEx(model_info->model, model_info->transform.translation,
+                        axis, angle,
+                        model_info->transform.scale, DARKGRAY);
+                }
             }
 
             DrawCube(Vector3{0.0, 5.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);

@@ -6,7 +6,7 @@
 #define BUSINESS_GAME_SINGLECHUNKGRID_HPP
 #include "VoxelGrid.hpp"
 
-class SingleChunkGrid final : VoxelGrid {
+class SingleChunkGrid final : public VoxelGrid {
 public:
     Transform transform;
     VoxelChunk data;
