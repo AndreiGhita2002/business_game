@@ -77,9 +77,13 @@ namespace global {
     static void updateLights();
     static void updateVoxelMesh();
 
+    // Drawing Functions
+    // Should always be within a BeginMode3D()/EndMode3D() block.
+    void drawVoxelScene();
+    void drawVoxelModel(const ModelInfo& model_info);
+
     // Helper Functions
     bool isInRenderDistance(Vector3 v);
-    void drawModel(const ModelInfo& model_info);
 }
 
 Vector3 apply_transform(Vector3 v, const Transform &t);

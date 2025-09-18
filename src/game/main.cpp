@@ -177,11 +177,7 @@ void global::mainLoop() {
         ClearBackground(RAYWHITE);
         BeginMode3D(camera);
         {
-            for (VoxelGrid* grid : voxel_grids) {
-                for (ModelInfo* model_info : grid->get_models()) {
-                    drawModel(*model_info);
-                }
-            }
+            drawVoxelScene();
 
             // Shader Mode is only necessary for immediate draw calls
             BeginShaderMode(voxel_shader);
@@ -266,7 +262,15 @@ bool global::isInRenderDistance(const Vector3 v) {
     || !limit_render_distance;
 }
 
-void global::drawModel(const ModelInfo& model_info) {
+void global::drawVoxelScene() {
+    for (VoxelGrid* grid : voxel_grids) {
+        for (ModelInfo* model_info : grid->get_models()) {
+            drawVoxelModel(*model_info);
+        }
+    }
+}
+
+void global::drawVoxelModel(const ModelInfo& model_info) {
     // Offset
     auto offset = Vector3Scale(model_info.transform.translation, voxel_scale);
 
