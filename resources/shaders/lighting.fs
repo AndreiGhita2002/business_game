@@ -24,7 +24,7 @@ struct Light {
 };
 
 uniform Light lights[MAX_LIGHTS];
-uniform vec4  ambient;   // e.g. vec4(0.2, 0.2, 0.2, 1.0)
+uniform vec4  ambient;
 uniform vec3  viewPos;   // camera position (world)
 
 // Output
@@ -47,8 +47,7 @@ void main()
     // Simple Phong/Blinn-Phong parameters
     const float shininess = 16.0;
 
-    for (int i = 0; i < MAX_LIGHTS; ++i)
-    {
+    for (int i = 0; i < MAX_LIGHTS; ++i) {
         if (lights[i].enabled == 0) continue;
 
         vec3 L;
