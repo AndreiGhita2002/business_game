@@ -57,9 +57,12 @@ namespace global {
 
     inline raylib::Camera camera;
     inline raylib::Shader voxel_shader;
+
     inline int next_light_id = 0;
     inline std::vector<Light> lights;
     inline Light* sun_light;
+    inline Light* camera_light;
+    inline bool move_camera_light = true;
 
     inline std::vector<VoxelGrid*> voxel_grids;
     inline VoxelMap* game_map;
@@ -76,6 +79,7 @@ namespace global {
 
     // Helper Functions
     bool isInRenderDistance(Vector3 v);
+    void drawModel(const ModelInfo& model_info);
 }
 
 Vector3 apply_transform(Vector3 v, const Transform &t);

@@ -16,70 +16,6 @@
 
 #define GLSL_VERSION 330
 
-Light& Light::create(LightType t, Vector3 pos, Vector3 tgt, Color col, const Shader& shader) {
-    // Emplace a default Light in the vector and fill it in-place.
-    Light& L = global::lights.emplace_back();
-
-    L.enabled = true;
-    L.type = static_cast<int>(t);
-    L.position = pos;
-    L.target = tgt;
-    L.color = col;
-
-    L.id = global::next_light_id++;
-    // NOTE: uniform names must match your shader
-    L.enabled_loc  = GetShaderLocation(shader, TextFormat("lights[%i].enabled",  L.id));
-    L.type_loc     = GetShaderLocation(shader, TextFormat("lights[%i].type",     L.id));
-    L.position_loc = GetShaderLocation(shader, TextFormat("lights[%i].position", L.id));
-    L.target_loc   = GetShaderLocation(shader, TextFormat("lights[%i].target",   L.id));
-    L.color_loc    = GetShaderLocation(shader, TextFormat("lights[%i].color",    L.id));
-    // If you actually use attenuation in the shader, set it too:
-    // L.attenuationLoc = GetShaderLocation(shader, TextFormat("lights[%i].attenuation", L.id));
-
-    return L;
-}
-
-void Light::update(Shader shader) const {
-    // Send to shader light enabled state and type
-    int s_enabled = enabled ? 1 : 0;
-    SetShaderValue(shader, enabled_loc, &s_enabled, SHADER_UNIFORM_INT);
-    int s_type = (type == POINT_LIGHT) ? 1 : 0;
-    SetShaderValue(shader, type_loc, &s_type, SHADER_UNIFORM_INT);
-
-    // Send to shader light position values
-    float s_position[3] = {position.x, position.y, position.z};
-    SetShaderValue(shader, position_loc, s_position, SHADER_UNIFORM_VEC3);
-
-    // Send to shader light target position values
-    float s_target[3] = {target.x, target.y, target.z};
-    SetShaderValue(shader, target_loc, s_target, SHADER_UNIFORM_VEC3);
-
-    // Send to shader light color values
-    Vector4 s_color = { color.r/255.f, color.g/255.f, color.b/255.f, color.a/255.f };
-    SetShaderValue(shader, color_loc, &s_color, SHADER_UNIFORM_VEC4);
-}
-
-Vector3 apply_transform(const Vector3 v, const Transform &t) {
-    // Scale
-    Vector3 scaled = {
-        v.x * t.scale.x,
-        v.y * t.scale.y,
-        v.z * t.scale.z
-    };
-
-    // Rotate
-    Vector3 rotated = Vector3RotateByQuaternion(scaled, t.rotation);
-
-    // Translate
-    return Vector3Add(rotated, t.translation);
-}
-
-bool global::isInRenderDistance(const Vector3 v) {
-    // TODO (optimisation) this should be rewritten so that it doesn't use a sqrt operation
-    return Vector3Distance(camera.position, v) <= render_distance
-    || !limit_render_distance;
-}
-
 void global::init() {
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
     raylib::Window::Init(1600, 900, "business game");
@@ -94,11 +30,7 @@ void global::init() {
     };
 
     voxel_shader = LoadShader("../resources/shaders/lighting.vs", "../resources/shaders/lighting.fs");
-    // Get some required shader locations
     voxel_shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(voxel_shader, "viewPos");
-    // NOTE: "matModel" location name is automatically assigned on shader loading,
-    // no need to get the location again if using that uniform name
-    //shader.locs[SHADER_LOC_MATRIX_MODEL] = GetShaderLocation(shader, "matModel");
 
     // Ambient light level (some basic lighting)
     int ambientLoc = GetShaderLocation(voxel_shader, "ambient");
@@ -106,8 +38,10 @@ void global::init() {
 
     // Create lights
     lights = std::vector<Light>();
-    auto light_pos = Vector3Scale(Vector3{15.0, 6.0, 15.0}, global::voxel_scale);
+    auto light_pos = Vector3Scale(Vector3{15.0, 6.0, 15.0}, voxel_scale);
     sun_light = &Light::create(POINT_LIGHT, light_pos, Vector3Zero(), WHITE, voxel_shader);
+    sun_light->enabled = false;
+    camera_light = &Light::create(DIRECTIONAL_LIGHT, camera.position, camera.target, WHITE, voxel_shader);
 
     // Voxels
     voxel_grids = std::vector<VoxelGrid*>();
@@ -208,6 +142,18 @@ void global::updateCamera() {
 }
 
 void global::updateLights() {
+    // Light Controls
+    if (IsKeyReleased(KEY_Y)) move_camera_light = !move_camera_light;
+    //TODO toggling the sun_light for some reason doesn't work
+    if (IsKeyReleased(KEY_U)) sun_light->enabled = !sun_light->enabled;
+
+    // Camera Light
+    if (move_camera_light) {
+        camera_light->position = camera.position;
+        camera_light->target = camera.target;
+    }
+
+    // Update
     for (Light &light : lights) {
         light.update(voxel_shader);
     }
@@ -233,24 +179,7 @@ void global::mainLoop() {
         {
             for (VoxelGrid* grid : voxel_grids) {
                 for (ModelInfo* model_info : grid->get_models()) {
-                    // Offset
-                    auto offset = Vector3Scale(model_info->transform.translation, voxel_scale);
-
-                    // Rotation
-                    auto axis = Vector3{};
-                    auto angle = 0.0f;
-                    QuaternionToAxisAngle(model_info->transform.rotation, &axis, &angle);
-
-                    // Scale
-                    auto scale = Vector3Scale(model_info->transform.scale, voxel_scale);
-
-                    // Drawing the model
-                    DrawModelEx(model_info->model, offset,
-                        axis, angle, scale, WHITE);
-
-                    // Drawing wires
-                    // DrawModelWiresEx(model_info->model, offset,
-                    //     axis, angle, scale, DARKGRAY);
+                    drawModel(*model_info);
                 }
             }
 
@@ -271,6 +200,91 @@ void global::mainLoop() {
         EndMode3D();
     }
     EndDrawing();
+}
+
+Light& Light::create(LightType t, Vector3 pos, Vector3 tgt, Color col, const Shader& shader) {
+    // Emplace a default Light in the vector and fill it in-place.
+    Light& L = global::lights.emplace_back();
+
+    L.enabled = true;
+    L.type = static_cast<int>(t);
+    L.position = pos;
+    L.target = tgt;
+    L.color = col;
+
+    L.id = global::next_light_id++;
+    // NOTE: uniform names must match your shader
+    L.enabled_loc  = GetShaderLocation(shader, TextFormat("lights[%i].enabled",  L.id));
+    L.type_loc     = GetShaderLocation(shader, TextFormat("lights[%i].type",     L.id));
+    L.position_loc = GetShaderLocation(shader, TextFormat("lights[%i].position", L.id));
+    L.target_loc   = GetShaderLocation(shader, TextFormat("lights[%i].target",   L.id));
+    L.color_loc    = GetShaderLocation(shader, TextFormat("lights[%i].color",    L.id));
+    // If you actually use attenuation in the shader, set it too:
+    // L.attenuationLoc = GetShaderLocation(shader, TextFormat("lights[%i].attenuation", L.id));
+
+    return L;
+}
+
+void Light::update(Shader shader) const {
+    // Send to shader light enabled state and type
+    int s_enabled = enabled ? 1 : 0;
+    SetShaderValue(shader, enabled_loc, &s_enabled, SHADER_UNIFORM_INT);
+    int s_type = (type == POINT_LIGHT) ? 1 : 0;
+    SetShaderValue(shader, type_loc, &s_type, SHADER_UNIFORM_INT);
+
+    // Send to shader light position values
+    float s_position[3] = {position.x, position.y, position.z};
+    SetShaderValue(shader, position_loc, s_position, SHADER_UNIFORM_VEC3);
+
+    // Send to shader light target position values
+    float s_target[3] = {target.x, target.y, target.z};
+    SetShaderValue(shader, target_loc, s_target, SHADER_UNIFORM_VEC3);
+
+    // Send to shader light color values
+    Vector4 s_color = { color.r/255.f, color.g/255.f, color.b/255.f, color.a/255.f };
+    SetShaderValue(shader, color_loc, &s_color, SHADER_UNIFORM_VEC4);
+}
+
+Vector3 apply_transform(const Vector3 v, const Transform &t) {
+    // Scale
+    Vector3 scaled = {
+        v.x * t.scale.x,
+        v.y * t.scale.y,
+        v.z * t.scale.z
+    };
+
+    // Rotate
+    Vector3 rotated = Vector3RotateByQuaternion(scaled, t.rotation);
+
+    // Translate
+    return Vector3Add(rotated, t.translation);
+}
+
+bool global::isInRenderDistance(const Vector3 v) {
+    // TODO (optimisation) this should be rewritten so that it doesn't use a sqrt operation
+    return Vector3Distance(camera.position, v) <= render_distance
+    || !limit_render_distance;
+}
+
+void global::drawModel(const ModelInfo& model_info) {
+    // Offset
+    auto offset = Vector3Scale(model_info.transform.translation, voxel_scale);
+
+    // Rotation
+    auto axis = Vector3{};
+    auto angle = 0.0f;
+    QuaternionToAxisAngle(model_info.transform.rotation, &axis, &angle);
+
+    // Scale
+    auto scale = Vector3Scale(model_info.transform.scale, voxel_scale);
+
+    // Drawing the model
+    DrawModelEx(model_info.model, offset,
+        axis, angle, scale, WHITE);
+
+    // Drawing wires
+    // DrawModelWiresEx(model_info->model, offset,
+    //     axis, angle, scale, DARKGRAY);
 }
 
 int main() {
