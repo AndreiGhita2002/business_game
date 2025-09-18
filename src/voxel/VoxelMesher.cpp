@@ -10,6 +10,7 @@
 #include <cstring> // memcpy
 #include <raymath.h>
 #include "VoxelMap.hpp"
+#include "game/main.hpp"
 
 
 // Helper: linear index for (x,y,z_map) in chunk
@@ -192,6 +193,7 @@ Model build_chunk_model(const std::vector<MaterialMesh> &mats, const std::map<Vo
             c = it->second;
 
         model.materials[i].maps[MATERIAL_MAP_DIFFUSE].color = c;
+        model.materials[i].shader = global::voxel_shader;
     }
 
     // 3) Map each mesh to its material

@@ -3,6 +3,9 @@
 //
 
 #include "main.hpp"
+
+#include <iostream>
+
 #include "raylib-cpp.hpp"
 #include "voxel/VoxelMesher.hpp"
 #include "voxel/SingleChunkGrid.hpp"
@@ -11,6 +14,50 @@
     #include <emscripten/emscripten.h>
 #endif
 
+#define GLSL_VERSION 330
+
+Light& Light::create(LightType t, Vector3 pos, Vector3 tgt, Color col, const Shader& shader) {
+    // Emplace a default Light in the vector and fill it in-place.
+    Light& L = global::lights.emplace_back();
+
+    L.enabled = true;
+    L.type = static_cast<int>(t);
+    L.position = pos;
+    L.target = tgt;
+    L.color = col;
+
+    L.id = global::next_light_id++;
+    // NOTE: uniform names must match your shader
+    L.enabled_loc  = GetShaderLocation(shader, TextFormat("lights[%i].enabled",  L.id));
+    L.type_loc     = GetShaderLocation(shader, TextFormat("lights[%i].type",     L.id));
+    L.position_loc = GetShaderLocation(shader, TextFormat("lights[%i].position", L.id));
+    L.target_loc   = GetShaderLocation(shader, TextFormat("lights[%i].target",   L.id));
+    L.color_loc    = GetShaderLocation(shader, TextFormat("lights[%i].color",    L.id));
+    // If you actually use attenuation in the shader, set it too:
+    // L.attenuationLoc = GetShaderLocation(shader, TextFormat("lights[%i].attenuation", L.id));
+
+    return L;
+}
+
+void Light::update(Shader shader) const {
+    // Send to shader light enabled state and type
+    int s_enabled = enabled ? 1 : 0;
+    SetShaderValue(shader, enabled_loc, &s_enabled, SHADER_UNIFORM_INT);
+    int s_type = (type == POINT_LIGHT) ? 1 : 0;
+    SetShaderValue(shader, type_loc, &s_type, SHADER_UNIFORM_INT);
+
+    // Send to shader light position values
+    float s_position[3] = {position.x, position.y, position.z};
+    SetShaderValue(shader, position_loc, s_position, SHADER_UNIFORM_VEC3);
+
+    // Send to shader light target position values
+    float s_target[3] = {target.x, target.y, target.z};
+    SetShaderValue(shader, target_loc, s_target, SHADER_UNIFORM_VEC3);
+
+    // Send to shader light color values
+    Vector4 s_color = { color.r/255.f, color.g/255.f, color.b/255.f, color.a/255.f };
+    SetShaderValue(shader, color_loc, &s_color, SHADER_UNIFORM_VEC4);
+}
 
 Vector3 apply_transform(const Vector3 v, const Transform &t) {
     // Scale
@@ -34,16 +81,35 @@ bool global::isInRenderDistance(const Vector3 v) {
 }
 
 void global::init() {
+    SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
     raylib::Window::Init(1600, 900, "business game");
     camera = {
         {
-            { 15.0f, 15.0f, 15.0f },
+            { 10.0f, 5.0f, 0.0f },
             { 0.0f, 0.0f, 0.0f },
             { 0.0f, 1.0f, 0.0f },
             45.0f,
             0
         },
     };
+
+    voxel_shader = LoadShader("../resources/shaders/lighting.vs", "../resources/shaders/lighting.fs");
+    // Get some required shader locations
+    voxel_shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(voxel_shader, "viewPos");
+    // NOTE: "matModel" location name is automatically assigned on shader loading,
+    // no need to get the location again if using that uniform name
+    //shader.locs[SHADER_LOC_MATRIX_MODEL] = GetShaderLocation(shader, "matModel");
+
+    // Ambient light level (some basic lighting)
+    int ambientLoc = GetShaderLocation(voxel_shader, "ambient");
+    SetShaderValue(voxel_shader, ambientLoc, (float[4]){0.01f, 0.01f, 0.01f, 1.0f}, SHADER_UNIFORM_VEC4);
+
+    // Create lights
+    lights = std::vector<Light>();
+    auto light_pos = Vector3Scale(Vector3{15.0, 6.0, 15.0}, global::voxel_scale);
+    sun_light = &Light::create(POINT_LIGHT, light_pos, Vector3Zero(), WHITE, voxel_shader);
+
+    // Voxels
     voxel_grids = std::vector<VoxelGrid*>();
 
     game_map = new VoxelMap(128, 128);
@@ -61,6 +127,9 @@ void global::init() {
 }
 
 void global::shutdown() {
+    // TODO: this function should be called, but it produces a double free
+    //  figure out how to call it without the error
+    // UnloadShader(shader);
     raylib::Window::Close();
 }
 
@@ -132,6 +201,16 @@ void global::updateCamera() {
         camera.position.y -= moveSpeed;
         camera.target.y   -= moveSpeed;
     }
+
+    // --- Shader Update ---
+    float cameraPos[3] = { camera.position.x, camera.position.y, camera.position.z };
+    SetShaderValue(voxel_shader, voxel_shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
+}
+
+void global::updateLights() {
+    for (Light &light : lights) {
+        light.update(voxel_shader);
+    }
 }
 
 void global::updateVoxelMesh() {
@@ -144,6 +223,7 @@ void global::mainLoop() {
     // Update
     updateCamera();
     updateVoxelMesh();
+    updateLights();
 
     // Draw
     BeginDrawing();
@@ -169,12 +249,24 @@ void global::mainLoop() {
                         axis, angle, scale, WHITE);
 
                     // Drawing wires
-                    DrawModelWiresEx(model_info->model, offset,
-                        axis, angle, scale, DARKGRAY);
+                    // DrawModelWiresEx(model_info->model, offset,
+                    //     axis, angle, scale, DARKGRAY);
                 }
             }
 
-            DrawCube(Vector3{0.0, 0.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);
+            // Shader Mode is only necessary for immediate draw calls
+            BeginShaderMode(voxel_shader);
+            {
+                // Test Cube
+                DrawCube(Vector3{0.0, 0.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);
+            }
+            EndShaderMode();
+
+            // Draw spheres to show where the lights are
+            for (Light light : lights) {
+                if (light.enabled) DrawSphereEx(light.position, 0.2f, 8, 8, light.color);
+                else DrawSphereWires(light.position, 0.2f, 8, 8, ColorAlpha(light.color, 0.3f));
+            }
         }
         EndMode3D();
     }
