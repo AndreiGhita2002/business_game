@@ -39,8 +39,8 @@ void global::init() {
     // Create lights
     lights = std::vector<Light>();
     auto light_pos = Vector3Scale(Vector3{15.0, 6.0, 15.0}, voxel_scale);
-    sun_light = &Light::create(POINT_LIGHT, light_pos, Vector3Zero(), WHITE, voxel_shader);
-    sun_light->enabled = false;
+    // sun_light = &Light::create(POINT_LIGHT, light_pos, Vector3Zero(), WHITE, voxel_shader);
+    // sun_light->enabled = false;
     camera_light = &Light::create(DIRECTIONAL_LIGHT, camera.position, camera.target, WHITE, voxel_shader);
 
     // Voxels
@@ -64,6 +64,7 @@ void global::shutdown() {
     // TODO: this function should be called, but it produces a double free
     //  figure out how to call it without the error
     // UnloadShader(shader);
+
     raylib::Window::Close();
 }
 
@@ -145,7 +146,7 @@ void global::updateLights() {
     // Light Controls
     if (IsKeyReleased(KEY_Y)) move_camera_light = !move_camera_light;
     //TODO toggling the sun_light for some reason doesn't work
-    if (IsKeyReleased(KEY_U)) sun_light->enabled = !sun_light->enabled;
+    // if (IsKeyReleased(KEY_U)) sun_light->enabled = !sun_light->enabled;
 
     // Camera Light
     if (move_camera_light) {
@@ -171,10 +172,44 @@ void global::mainLoop() {
     updateVoxelMesh();
     updateLights();
 
-    // Draw
+    Matrix light_view = { 0 };
+    Matrix light_proj = { 0 };
+    Matrix light_view_proj = { 0 };
+
+    // PASS 1: Render all objects into the shadow map render texture
+    for (Light& light : lights) {
+        BeginTextureMode(*light.shadow_map);
+        {
+            ClearBackground(WHITE);
+
+            BeginMode3D(light.light_camera);
+            {
+                light_view = rlGetMatrixModelview();
+                light_proj = rlGetMatrixProjection();
+                drawVoxelScene();
+            }
+            EndMode3D();
+        }
+        EndTextureMode();
+
+        // Update
+        light_view_proj = MatrixMultiply(light_view, light_proj);
+        SetShaderValueMatrix(voxel_shader, light.vp_loc, light_view_proj);
+    }
+
+    // PASS 2: Drawing
     BeginDrawing();
     {
         ClearBackground(RAYWHITE);
+
+        rlEnableShader(voxel_shader.id);
+
+        for (Light& light : lights) {
+            rlActiveTextureSlot(light.texture_loc);
+            rlEnableTexture(light.shadow_map->depth.id);
+            rlSetUniform(light.shadow_map_loc, &light.texture_loc, SHADER_UNIFORM_INT, 1);
+        }
+
         BeginMode3D(camera);
         {
             drawVoxelScene();
@@ -188,7 +223,7 @@ void global::mainLoop() {
             EndShaderMode();
 
             // Draw spheres to show where the lights are
-            for (Light light : lights) {
+            for (Light& light : lights) {
                 if (light.enabled) DrawSphereEx(light.position, 0.2f, 8, 8, light.color);
                 else DrawSphereWires(light.position, 0.2f, 8, 8, ColorAlpha(light.color, 0.3f));
             }
@@ -217,11 +252,56 @@ Light& Light::create(LightType t, Vector3 pos, Vector3 tgt, Color col, const Sha
     L.color_loc    = GetShaderLocation(shader, TextFormat("lights[%i].color",    L.id));
     // If you actually use attenuation in the shader, set it too:
     // L.attenuationLoc = GetShaderLocation(shader, TextFormat("lights[%i].attenuation", L.id));
+    L.texture_loc = L.id + 10; //todo no idea what this does
+
+    L.vp_loc = GetShaderLocation(shader, TextFormat("lightVP[%i]", L.id));
+    L.shadow_map_loc = GetShaderLocation(shader, TextFormat("shadowMap[%i]", L.id));
+    auto res = SHADOWMAP_RESOLUTION;
+    SetShaderValue(shader, GetShaderLocation(shader, "shadowMapResolution"), &res, SHADER_UNIFORM_INT);
+
+    // Light Camera for the shadow mapping algorithm
+    L.light_camera = {
+        pos,
+        tgt,
+        { 0.0f, 1.0f, 0.0f },
+        20.0f,
+        CAMERA_ORTHOGRAPHIC
+    };
+
+    // Shadow Map
+    L.shadow_map = new raylib::RenderTexture2D();
+    L.shadow_map->id = rlLoadFramebuffer(); // load an empty framebuffer
+    L.shadow_map->texture.width = SHADOWMAP_RESOLUTION;
+    L.shadow_map->texture.height = SHADOWMAP_RESOLUTION;
+    if (L.shadow_map->id > 0) {
+        rlEnableFramebuffer(L.shadow_map->id);
+
+        // Create depth texture
+        L.shadow_map->depth.id = rlLoadTextureDepth(SHADOWMAP_RESOLUTION, SHADOWMAP_RESOLUTION, false);
+        L.shadow_map->depth.width = SHADOWMAP_RESOLUTION;
+        L.shadow_map->depth.height = SHADOWMAP_RESOLUTION;
+        L.shadow_map->depth.format = 19; // DEPTH_COMPONENT_24BIT?
+        L.shadow_map->depth.mipmaps = 1;
+
+        // Attach depth texture to framebuffer
+        rlFramebufferAttach(L.shadow_map->id, L.shadow_map->depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
+
+        // Check if framebuffer is complete with attachments
+        if (rlFramebufferComplete(L.shadow_map->id))
+            TRACELOG(LOG_INFO, "FBO: [ID %i] Framebuffer object created successfully", shadow_map.id);
+
+        rlDisableFramebuffer();
+    }
+    else TRACELOG(LOG_WARNING, "FBO: Shadowmap frambuffer object can not be created!");
 
     return L;
 }
 
-void Light::update(Shader shader) const {
+void Light::update(Shader shader) {
+    // Move light camera
+    light_camera.position = position;
+    light_camera.target = target;
+
     // Send to shader light enabled state and type
     int s_enabled = enabled ? 1 : 0;
     SetShaderValue(shader, enabled_loc, &s_enabled, SHADER_UNIFORM_INT);
@@ -239,6 +319,13 @@ void Light::update(Shader shader) const {
     // Send to shader light color values
     Vector4 s_color = { color.r/255.f, color.g/255.f, color.b/255.f, color.a/255.f };
     SetShaderValue(shader, color_loc, &s_color, SHADER_UNIFORM_VEC4);
+}
+
+Light::~Light() {
+    // Unload Shadow Map
+    if (shadow_map->id > 0) {
+        rlUnloadFramebuffer(shadow_map->id);
+    }
 }
 
 Vector3 apply_transform(const Vector3 v, const Transform &t) {

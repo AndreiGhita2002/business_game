@@ -1,5 +1,8 @@
 #version 330
 
+// NOTES:
+//  POINT lights are lit but NOT shadowed here (visibility = 1.0).
+
 // Inputs from the vertex shader
 in vec3 fragPosition;
 in vec2 fragTexCoord;
@@ -7,7 +10,7 @@ in vec4 fragColor;
 in vec3 fragNormal;
 
 // Material/uniforms provided by raylib
-uniform sampler2D texture0;   // if no texture is bound, sample will be white
+uniform sampler2D texture0;   // base texture (bind a 1x1 white if untextured)
 uniform vec4 colDiffuse;      // material tint
 
 // Lighting uniforms
@@ -20,63 +23,116 @@ struct Light {
     int  type;
     vec3 position;
     vec3 target;
-    vec4 color;   // rgb in 0..1, a unused
+    vec4 color;   // rgb in 0..1
 };
 
 uniform Light lights[MAX_LIGHTS];
 uniform vec4  ambient;
 uniform vec3  viewPos;   // camera position (world)
 
+// Shadow maps + matrix (and texel size) per light
+uniform sampler2D shadowMap[MAX_LIGHTS];  // shadowMap[i] belongs to lights[i]
+uniform mat4      lightVP[MAX_LIGHTS];    // lightVP[i]   belongs to lights[i]
+uniform int   shadowMapResolution; // Side length (pixels)
+
 // Output
 out vec4 finalColor;
 
+// Shadow bias constants (replace with your preferred tuning)
+const float BIAS_BASE = 0.0002;  // slope-scale factor
+const float BIAS_MIN  = 0.00002; // minimum bias
+const float BIAS_EPS  = 0.00001; // small constant to reduce acne further
+
 void main()
 {
-    // Base color = texture * vertexColor * material color
+    // Base terms
     vec4 texelColor = texture(texture0, fragTexCoord);
-    // If you're truly untextured, you can force white:
-    // texelColor = vec4(1.0);
+    vec4 tint       = colDiffuse * fragColor;
+    vec3 N          = normalize(fragNormal);
+    vec3 V          = normalize(viewPos - fragPosition);
 
-    vec4 tint = colDiffuse * fragColor;
-    vec3 N = normalize(fragNormal);
-    vec3 V = normalize(viewPos - fragPosition);
+    // Accumulator for per-light contributions (matches example semantics per light)
+    vec3 accum = vec3(0.0);
 
-    vec3 diffuseSum  = vec3(0.0);
-    vec3 specularSum = vec3(0.0);
-
-    // Simple Phong/Blinn-Phong parameters
-    const float shininess = 16.0;
-
-    for (int i = 0; i < MAX_LIGHTS; ++i) {
+    // Per-light loop
+    for (int i = 0; i < MAX_LIGHTS; ++i)
+    {
         if (lights[i].enabled == 0) continue;
 
+        // Compute light direction at the fragment (unit vector pointing FROM fragment TOWARDS light)
         vec3 L;
-        if (lights[i].type == LIGHT_DIRECTIONAL) {
-            // Directional: direction from light position -> target
-            L = -normalize(lights[i].target - lights[i].position);
-        } else { // LIGHT_POINT
-            // Point: direction from fragment towards light
+        bool isDirectional = (lights[i].type == LIGHT_DIRECTIONAL);
+        if (isDirectional) {
+            // Example semantics: l = -lightDir, where lightDir = (target - position)
+            vec3 lightDir = normalize(lights[i].target - lights[i].position);
+            L = -lightDir;
+        } else {
+            // Point light: from fragment towards light position
             L = normalize(lights[i].position - fragPosition);
         }
 
         float NdotL = max(dot(N, L), 0.0);
-        diffuseSum += lights[i].color.rgb * NdotL;
+        if (NdotL <= 0.0) continue;
 
-        if (NdotL > 0.0) {
-            // Classic Phong specular
-            vec3 R = reflect(-L, N);
-            float spec = pow(max(dot(V, R), 0.0), shininess);
-            // White specular; tint if you want colored specular
-            specularSum += spec;
+        // Specular (Phong), shininess = 16 (as in example)
+        vec3 R = reflect(-L, N);
+        float spec = pow(max(dot(V, R), 0.0), 16.0);
+
+        // Per-light lit color before shadowing (match example combine per light):
+        // finalColor_light = texelColor * ((colDiffuse*fragColor + spec) * (lightColor*NdotL))
+        vec3 lightColor = lights[i].color.rgb;
+        vec3 perLight   = (texelColor.rgb) * ((tint.rgb + vec3(spec)) * (lightColor * NdotL));
+
+        // Shadow factor
+        float visibility = 1.0;
+
+        if (isDirectional)
+        {
+            // Project fragment into light space -> NDC -> [0,1]
+            vec4 fragLS = lightVP[0] * vec4(fragPosition, 1.0);
+            fragLS.xyz /= fragLS.w;
+            vec3 uvz    = fragLS.xyz * 0.5 + 0.5;
+
+            // Early out if outside light frustum
+            if (uvz.x >= 0.0 && uvz.x <= 1.0 &&
+                uvz.y >= 0.0 && uvz.y <= 1.0 &&
+                uvz.z >= 0.0 && uvz.z <= 1.0)
+            {
+                // Slope-scaled depth bias (match example constants)
+                float bias = max(0.0002 * (1.0 - dot(N, L)), 0.00002) + 0.00001;
+
+                // 3x3 PCF
+                const int numSamples = 9;
+                int occluded = 0;
+
+                vec2 texelSize = vec2(1.0 / float(shadowMapResolution));
+                for (int sx = -1; sx <= 1; ++sx)
+                {
+                    for (int sy = -1; sy <= 1; ++sy)
+                    {
+                        float sampleDepth = texture(shadowMap[0], uvz.xy + texelSize * vec2(sx, sy)).r;
+                        if (uvz.z - bias > sampleDepth) occluded++;
+                    }
+                }
+
+                float shadowFactor = float(occluded) / float(numSamples); // 0..1
+                visibility = 1.0 - shadowFactor; // mix(finalColor, black, shadowFactor) == color * visibility
+            }
+            // else: fragment outside light frustum -> treat as lit (visibility = 1)
         }
+
+        // Apply shadow visibility to this light and accumulate
+        accum += perLight * visibility;
     }
 
-    // Combine lighting (linear space)
-    vec4 base = texelColor * tint;
-    vec3 lit  = base.rgb * (diffuseSum + ambient.rgb) + specularSum;
+    // Ambient add (example adds ambient/10)
+    vec3 ambientTerm = (texelColor.rgb * (ambient.rgb / 10.0)) * tint.rgb;
 
-    finalColor = vec4(lit, base.a);
+    // Final color (gamma corrected like example)
+    vec3 lit = accum + ambientTerm;
+    float alpha = (texelColor * tint).a;
 
-    // Optional: gamma correct. Disable while debugging brightness if needed.
-    finalColor = pow(finalColor, vec4(1.0/2.2));
+    finalColor = vec4(lit, alpha);
+    finalColor = pow(finalColor, vec4(1.0 / 2.2));
 }
+
