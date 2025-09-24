@@ -43,20 +43,18 @@ const float BIAS_BASE = 0.0002;  // slope-scale factor
 const float BIAS_MIN  = 0.00002; // minimum bias
 const float BIAS_EPS  = 0.00001; // small constant to reduce acne further
 
-void main()
-{
+void main() {
     // Base terms
     vec4 texelColor = texture(texture0, fragTexCoord);
     vec4 tint       = colDiffuse * fragColor;
     vec3 N          = normalize(fragNormal);
     vec3 V          = normalize(viewPos - fragPosition);
 
-    // Accumulator for per-light contributions (matches example semantics per light)
+    // Accumulator for per-light contributions
     vec3 accum = vec3(0.0);
 
     // Per-light loop
-    for (int i = 0; i < MAX_LIGHTS; ++i)
-    {
+    for (int i = 0; i < MAX_LIGHTS; ++i) {
         if (lights[i].enabled == 0) continue;
 
         // Compute light direction at the fragment (unit vector pointing FROM fragment TOWARDS light)
@@ -78,7 +76,7 @@ void main()
         vec3 R = reflect(-L, N);
         float spec = pow(max(dot(V, R), 0.0), 16.0);
 
-        // Per-light lit color before shadowing (match example combine per light):
+        // Per-light lit color before shadowing
         // finalColor_light = texelColor * ((colDiffuse*fragColor + spec) * (lightColor*NdotL))
         vec3 lightColor = lights[i].color.rgb;
         vec3 perLight   = (texelColor.rgb) * ((tint.rgb + vec3(spec)) * (lightColor * NdotL));
@@ -86,8 +84,7 @@ void main()
         // Shadow factor
         float visibility = 1.0;
 
-        if (isDirectional)
-        {
+        if (isDirectional) {
             // Project fragment into light space -> NDC -> [0,1]
             vec4 fragLS = lightVP[0] * vec4(fragPosition, 1.0);
             fragLS.xyz /= fragLS.w;
@@ -96,20 +93,18 @@ void main()
             // Early out if outside light frustum
             if (uvz.x >= 0.0 && uvz.x <= 1.0 &&
                 uvz.y >= 0.0 && uvz.y <= 1.0 &&
-                uvz.z >= 0.0 && uvz.z <= 1.0)
-            {
-                // Slope-scaled depth bias (match example constants)
-                float bias = max(0.0002 * (1.0 - dot(N, L)), 0.00002) + 0.00001;
+                uvz.z >= 0.0 && uvz.z <= 1.0) {
+
+                // Slope-scaled depth bias
+                float bias = max(BIAS_BASE * (1.0 - dot(N, L)), BIAS_MIN) + BIAS_EPS;
 
                 // 3x3 PCF
                 const int numSamples = 9;
                 int occluded = 0;
 
                 vec2 texelSize = vec2(1.0 / float(shadowMapResolution));
-                for (int sx = -1; sx <= 1; ++sx)
-                {
-                    for (int sy = -1; sy <= 1; ++sy)
-                    {
+                for (int sx = -1; sx <= 1; ++sx) {
+                    for (int sy = -1; sy <= 1; ++sy) {
                         float sampleDepth = texture(shadowMap[0], uvz.xy + texelSize * vec2(sx, sy)).r;
                         if (uvz.z - bias > sampleDepth) occluded++;
                     }

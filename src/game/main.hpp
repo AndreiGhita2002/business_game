@@ -69,6 +69,7 @@ namespace global {
     inline raylib::Camera camera;
     inline raylib::Shader voxel_shader;
 
+    inline float ambient[4] = {0.6f, 0.6f, 0.6f, 1.0f};
     inline int next_light_id = 0;
     inline std::vector<Light> lights;
     inline Light* sun_light;

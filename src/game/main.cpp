@@ -34,7 +34,7 @@ void global::init() {
 
     // Ambient light level (some basic lighting)
     int ambientLoc = GetShaderLocation(voxel_shader, "ambient");
-    SetShaderValue(voxel_shader, ambientLoc, (float[4]){0.01f, 0.01f, 0.01f, 1.0f}, SHADER_UNIFORM_VEC4);
+    SetShaderValue(voxel_shader, ambientLoc, ambient, SHADER_UNIFORM_VEC4);
 
     // Create lights
     lights = std::vector<Light>();
@@ -154,6 +154,9 @@ void global::updateLights() {
         camera_light->target = camera.target;
     }
 
+    if (IsKeyPressed(KEY_O)) camera_light->light_camera.fovy += 1.0f;
+    if (IsKeyPressed(KEY_P)) camera_light->light_camera.fovy -= 1.0f;
+
     // Update
     for (Light &light : lights) {
         light.update(voxel_shader);
@@ -229,6 +232,7 @@ void global::mainLoop() {
             }
         }
         EndMode3D();
+        DrawText(TextFormat("light fov: [%f]", lights[0].light_camera.fovy), 10, 10, 10, BLACK);
     }
     EndDrawing();
 }
@@ -264,7 +268,7 @@ Light& Light::create(LightType t, Vector3 pos, Vector3 tgt, Color col, const Sha
         pos,
         tgt,
         { 0.0f, 1.0f, 0.0f },
-        20.0f,
+        32.0f,
         CAMERA_ORTHOGRAPHIC
     };
 
