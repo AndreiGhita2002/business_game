@@ -48,10 +48,10 @@ void global::init() {
 
     // Create lights
     lights = std::vector<Light>();
-    auto light_pos = Vector3Scale(Vector3{128, 8.0, 128.0}, voxel_scale);
-    auto light_tgt = Vector3Scale(Vector3{5.0, 5.0, 5.0}, voxel_scale);
+    auto sun_pos = Vector3Scale(Vector3{32.0, 8.0, 32.0}, voxel_scale);
+    auto sun_tgt = Vector3Scale(Vector3{48.0, 0.0, 48.0}, voxel_scale);
     camera_light_id = Light::create(DIRECTIONAL_LIGHT, camera.position, camera.target, WHITE, voxel_shader);
-    sun_light_id = Light::create(DIRECTIONAL_LIGHT, light_pos, light_tgt, WHITE, voxel_shader);
+    sun_light_id = Light::create(DIRECTIONAL_LIGHT, sun_pos, sun_tgt, WHITE, voxel_shader);
 
     lights[sun_light_id].enabled = true;
 
@@ -192,7 +192,7 @@ void global::mainLoop() {
 
     // PASS 1: Render all objects into the shadow map render texture
     for (Light& light : lights) {
-        if (!light.shadow_map || !light.enabled) continue;
+        // if (!light.shadow_map || !light.enabled) continue;
 
         BeginTextureMode(*light.shadow_map);
         {
@@ -254,10 +254,8 @@ void global::mainLoop() {
         }
         EndMode3D();
 
-        // DrawTextureRec(sun_light->shadow_map->depth,
-        //             Rectangle{0, 0, (float)sun_light->shadow_map->texture.width, -(float)sun_light->shadow_map->texture.height}, (Vector2){10, 10}, RED);
-
-
+        // DrawTextureRec(lights[camera_light_id].shadow_map->depth,
+        //             Rectangle{0, 0, float(SHADOWMAP_RESOLUTION), -float(SHADOWMAP_RESOLUTION)}, (Vector2){10, 10}, RED);
     }
     EndDrawing();
 }
@@ -269,7 +267,7 @@ size_t Light::create(LightType type, Vector3 pos, Vector3 target, Color color, c
     light.enabled = true;
     light.type = type == DIRECTIONAL_LIGHT ? 0 : 1;
     light.position = pos;
-    light.target = Vector3Normalize(Vector3Subtract(target, pos));
+    light.target = target;
     light.color = color;
 
     light.id = global::next_light_id++;
@@ -307,7 +305,7 @@ size_t Light::create(LightType type, Vector3 pos, Vector3 target, Color color, c
         light.shadow_map->depth.id = rlLoadTextureDepth(SHADOWMAP_RESOLUTION, SHADOWMAP_RESOLUTION, false);
         light.shadow_map->depth.width = SHADOWMAP_RESOLUTION;
         light.shadow_map->depth.height = SHADOWMAP_RESOLUTION;
-        light.shadow_map->depth.format = PIXELFORMAT_COMPRESSED_ETC2_RGB; // DEPTH_COMPONENT_24BIT?
+        // light.shadow_map->depth.format = PIXELFORMAT_COMPRESSED_ETC2_RGB; // Already written by rlLoadTextureDepth
         light.shadow_map->depth.mipmaps = 1;
 
         // Attach depth texture to framebuffer
@@ -322,6 +320,12 @@ size_t Light::create(LightType type, Vector3 pos, Vector3 target, Color color, c
         rlDisableFramebuffer();
     }
     else TRACELOG(LOG_WARNING, "FBO: Shadowmap frambuffer object can not be created!");
+
+    TraceLog(LOG_DEBUG, "[Light] %zu: unit=%d locSamp=%d fbo=%u depthTex=%u pos=(%.2f,%.2f,%.2f) tgt=(%.2f,%.2f,%.2f)",
+        light.id, light.texture_loc, light.shadow_map_loc,
+        light.shadow_map->id, light.shadow_map->depth.id,
+        light.position.x, light.position.y, light.position.z,
+        light.target.x, light.target.y, light.target.z);
 
     return global::lights.size() - 1;
 }
@@ -351,10 +355,82 @@ void Light::update(Shader shader) {
 }
 
 Light::~Light() {
-    // Unload Shadow Map
-    if (shadow_map->id > 0) {
-        rlUnloadFramebuffer(shadow_map->id);
+    if (shadow_map) {
+        // Only unload if it looks valid
+        if (shadow_map->id != 0) {
+            UnloadRenderTexture(*shadow_map);
+        }
+        delete shadow_map;
+        shadow_map = nullptr;
     }
+    else { TraceLog(LOG_DEBUG, "[Light] %i: shadow map already freed!", id); }
+}
+
+// Move constructor
+Light::Light(Light&& other) noexcept
+    : id(other.id)
+    , type(other.type)
+    , enabled(other.enabled)
+    , position(other.position)
+    , target(other.target)
+    , color(other.color)
+    , attenuation(other.attenuation)
+    , light_camera(other.light_camera)
+    , shadow_map(other.shadow_map)                   // take ownership
+    , light_view_proj(other.light_view_proj)
+    , enabled_loc(other.enabled_loc)
+    , type_loc(other.type_loc)
+    , position_loc(other.position_loc)
+    , target_loc(other.target_loc)
+    , color_loc(other.color_loc)
+    , attenuation_loc(other.attenuation_loc)
+    , vp_loc(other.vp_loc)
+    , shadow_map_loc(other.shadow_map_loc)
+    , texture_loc(other.texture_loc)
+{
+    // leave 'other' in a destructible state
+    other.shadow_map = nullptr;
+}
+
+// Move assignment
+Light& Light::operator=(Light&& other) noexcept {
+    if (this != &other) {
+        // Release current ownership first
+        if (shadow_map) {
+            if (shadow_map->id != 0) {
+                UnloadRenderTexture(*shadow_map);
+            }
+            delete shadow_map;
+        }
+
+        // Trivially copy POD/aggregate members
+        id           = other.id;
+        type         = other.type;
+        enabled      = other.enabled;
+        position     = other.position;
+        target       = other.target;
+        color        = other.color;
+        attenuation  = other.attenuation;
+
+        light_camera    = other.light_camera;
+        light_view_proj = other.light_view_proj;
+
+        // Take ownership of the render texture pointer
+        shadow_map   = other.shadow_map;
+        other.shadow_map = nullptr;
+
+        // Shader locations (just copy)
+        enabled_loc     = other.enabled_loc;
+        type_loc        = other.type_loc;
+        position_loc    = other.position_loc;
+        target_loc      = other.target_loc;
+        color_loc       = other.color_loc;
+        attenuation_loc = other.attenuation_loc;
+        vp_loc          = other.vp_loc;
+        shadow_map_loc  = other.shadow_map_loc;
+        texture_loc     = other.texture_loc;
+    }
+    return *this;
 }
 
 Vector3 apply_transform(const Vector3 v, const Transform &t) {
@@ -383,11 +459,9 @@ std::string global::loadFile(const std::string& path) {
     if (!file.is_open()) {
         throw std::runtime_error("Failed to open file: " + path);
     }
-
     std::ostringstream buffer;
     buffer << file.rdbuf();
     return buffer.str();
-
 }
 
 raylib::Shader global::loadAndPatchShader(const std::string& shader_path, int light_count) {

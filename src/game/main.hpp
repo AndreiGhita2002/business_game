@@ -29,7 +29,7 @@ struct Light {
     float attenuation{1.0f}; // not used
 
     Camera3D light_camera;
-    raylib::RenderTexture2D* shadow_map;
+    raylib::RenderTexture2D* shadow_map = nullptr;
     Matrix light_view_proj{};
 
     // Shader locations
@@ -49,14 +49,14 @@ struct Light {
     // Side Effects: edits global::lights and global::next_light_id
     static size_t create(LightType type, Vector3 pos, Vector3 target, Color color, const Shader& shader);
 
+    Light() = default;
     ~Light();
 
-    Light() = default;
-//     Light(const Light&) = delete;
-//     Light& operator=(const Light&) = default;
-// private:
-//     // prevent accidental direct construction with side effects
-//     Light(LightType, Vector3, Vector3, Color, Shader) = delete;
+    Light(Light&& other) noexcept; // implement this
+    Light& operator=(Light&& other) noexcept; // and implement this
+
+    Light(const Light&) = delete;
+    Light& operator=(const Light&) = delete;
 };
 
 
