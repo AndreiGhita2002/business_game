@@ -1,5 +1,8 @@
-# Business Game (Work in Progree)
+# Business Game (Work in Progress)
 
-This project will be a tycoon game inspired by [OpenTTD](https://www.openttd.org/)
+Work in progress tycoon game inspired by [OpenTTD](https://www.openttd.org/)
  and other similar games where you manage a business.
-The project is in its early stages right now. 
+
+The basic rendering voxel engine is now done!
+
+![Early Screenshot](./readme_res/early_screenshot.png)
