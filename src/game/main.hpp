@@ -20,8 +20,8 @@ enum LightType {
 };
 
 struct Light {
+    unsigned int id{};
     int type{};
-    int id{};
     bool enabled{true};
     Vector3 position{};
     Vector3 target{};
@@ -30,6 +30,7 @@ struct Light {
 
     Camera3D light_camera;
     raylib::RenderTexture2D* shadow_map;
+    Matrix light_view_proj{};
 
     // Shader locations
     int enabled_loc{-1};
@@ -44,9 +45,9 @@ struct Light {
 
     void update(Shader shader);
 
-    // Factory: creates, initializes, registers, and returns the stored Light.
+    // Factory: creates, initializes, registers, and returns the index of the Light.
     // Side Effects: edits global::lights and global::next_light_id
-    static Light& create(LightType type, Vector3 pos, Vector3 target, Color color, const Shader& shader);
+    static size_t create(LightType type, Vector3 pos, Vector3 target, Color color, const Shader& shader);
 
     ~Light();
 
@@ -69,11 +70,11 @@ namespace global {
     inline raylib::Camera camera;
     inline raylib::Shader voxel_shader;
 
-    inline float ambient[4] = {0.6f, 0.6f, 0.6f, 1.0f};
-    inline int next_light_id = 0;
+    inline float ambient[4] = {0.06f, 0.06f, 0.06f, 1.0f};
+    inline unsigned int next_light_id = 0;
     inline std::vector<Light> lights;
-    inline Light* sun_light;
-    inline Light* camera_light;
+    inline size_t sun_light_id;
+    inline size_t camera_light_id;
     inline bool move_camera_light = true;
 
     inline std::vector<VoxelGrid*> voxel_grids;
@@ -96,6 +97,8 @@ namespace global {
 
     // Helper Functions
     bool isInRenderDistance(Vector3 v);
+    std::string loadFile(const std::string& path);
+    raylib::Shader loadAndPatchShader(const std::string& shader_path, int light_count);
 }
 
 Vector3 apply_transform(Vector3 v, const Transform &t);

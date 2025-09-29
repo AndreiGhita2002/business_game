@@ -5,6 +5,11 @@
 #include "main.hpp"
 
 #include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <stdexcept>
+#include <regex>
 
 #include "raylib-cpp.hpp"
 #include "voxel/VoxelMesher.hpp"
@@ -29,19 +34,26 @@ void global::init() {
         },
     };
 
-    voxel_shader = LoadShader("../resources/shaders/lighting.vs", "../resources/shaders/lighting.fs");
+    // voxel_shader = LoadShader("../resources/shaders/lighting.vs", "../resources/shaders/lighting.fs");
+    voxel_shader = loadAndPatchShader("../resources/shaders/lighting", 2);
     voxel_shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(voxel_shader, "viewPos");
 
     // Ambient light level (some basic lighting)
     int ambientLoc = GetShaderLocation(voxel_shader, "ambient");
     SetShaderValue(voxel_shader, ambientLoc, ambient, SHADER_UNIFORM_VEC4);
 
+    // Shadow map resolution
+    auto res = SHADOWMAP_RESOLUTION;
+    SetShaderValue(voxel_shader, GetShaderLocation(voxel_shader, "shadowMapResolution"), &res, SHADER_UNIFORM_INT);
+
     // Create lights
     lights = std::vector<Light>();
-    auto light_pos = Vector3Scale(Vector3{15.0, 6.0, 15.0}, voxel_scale);
-    // sun_light = &Light::create(POINT_LIGHT, light_pos, Vector3Zero(), WHITE, voxel_shader);
-    // sun_light->enabled = false;
-    camera_light = &Light::create(DIRECTIONAL_LIGHT, camera.position, camera.target, WHITE, voxel_shader);
+    auto light_pos = Vector3Scale(Vector3{128, 8.0, 128.0}, voxel_scale);
+    auto light_tgt = Vector3Scale(Vector3{5.0, 5.0, 5.0}, voxel_scale);
+    camera_light_id = Light::create(DIRECTIONAL_LIGHT, camera.position, camera.target, WHITE, voxel_shader);
+    sun_light_id = Light::create(DIRECTIONAL_LIGHT, light_pos, light_tgt, WHITE, voxel_shader);
+
+    lights[sun_light_id].enabled = true;
 
     // Voxels
     voxel_grids = std::vector<VoxelGrid*>();
@@ -145,17 +157,17 @@ void global::updateCamera() {
 void global::updateLights() {
     // Light Controls
     if (IsKeyReleased(KEY_Y)) move_camera_light = !move_camera_light;
-    //TODO toggling the sun_light for some reason doesn't work
-    // if (IsKeyReleased(KEY_U)) sun_light->enabled = !sun_light->enabled;
+    if (IsKeyReleased(KEY_U)) lights[sun_light_id].enabled = !lights[sun_light_id].enabled;
+    if (IsKeyReleased(KEY_I)) lights[camera_light_id].enabled = !lights[camera_light_id].enabled;
 
     // Camera Light
     if (move_camera_light) {
-        camera_light->position = camera.position;
-        camera_light->target = camera.target;
+        lights[camera_light_id].position = camera.position;
+        lights[camera_light_id].target = camera.target;
     }
 
-    if (IsKeyPressed(KEY_O)) camera_light->light_camera.fovy += 1.0f;
-    if (IsKeyPressed(KEY_P)) camera_light->light_camera.fovy -= 1.0f;
+    if (IsKeyPressed(KEY_O)) lights[camera_light_id].light_camera.fovy += 1.0f;
+    if (IsKeyPressed(KEY_P)) lights[camera_light_id].light_camera.fovy -= 1.0f;
 
     // Update
     for (Light &light : lights) {
@@ -175,29 +187,33 @@ void global::mainLoop() {
     updateVoxelMesh();
     updateLights();
 
-    Matrix light_view = { 0 };
-    Matrix light_proj = { 0 };
-    Matrix light_view_proj = { 0 };
+    Matrix light_view = {};
+    Matrix light_proj = {};
 
     // PASS 1: Render all objects into the shadow map render texture
     for (Light& light : lights) {
+        if (!light.shadow_map || !light.enabled) continue;
+
         BeginTextureMode(*light.shadow_map);
         {
+            // std::cout << light.id << ' ' << light.shadow_map->id << std::endl;
+
             ClearBackground(WHITE);
 
-            BeginMode3D(light.light_camera);
-            {
-                light_view = rlGetMatrixModelview();
-                light_proj = rlGetMatrixProjection();
-                drawVoxelScene();
+            if (light.enabled) {
+                BeginMode3D(light.light_camera);
+                {
+                    light_view = rlGetMatrixModelview();
+                    light_proj = rlGetMatrixProjection();
+                    drawVoxelScene();
+                }
+                EndMode3D();
             }
-            EndMode3D();
         }
         EndTextureMode();
 
         // Update
-        light_view_proj = MatrixMultiply(light_view, light_proj);
-        SetShaderValueMatrix(voxel_shader, light.vp_loc, light_view_proj);
+        light.light_view_proj = MatrixMultiply(light_view, light_proj);
     }
 
     // PASS 2: Drawing
@@ -211,6 +227,11 @@ void global::mainLoop() {
             rlActiveTextureSlot(light.texture_loc);
             rlEnableTexture(light.shadow_map->depth.id);
             rlSetUniform(light.shadow_map_loc, &light.texture_loc, SHADER_UNIFORM_INT, 1);
+            SetShaderValueMatrix(voxel_shader, light.vp_loc, light.light_view_proj);
+
+            // TraceLog(LOG_INFO, "light %d: unit=%d samplerLoc=%d fbo=%u depthTex=%u",
+            //     light.id, light.texture_loc, light.shadow_map_loc,
+            //     light.shadow_map->id, light.shadow_map->depth.id);
         }
 
         BeginMode3D(camera);
@@ -232,73 +253,77 @@ void global::mainLoop() {
             }
         }
         EndMode3D();
-        DrawText(TextFormat("light fov: [%f]", lights[0].light_camera.fovy), 10, 10, 10, BLACK);
+
+        // DrawTextureRec(sun_light->shadow_map->depth,
+        //             Rectangle{0, 0, (float)sun_light->shadow_map->texture.width, -(float)sun_light->shadow_map->texture.height}, (Vector2){10, 10}, RED);
+
+
     }
     EndDrawing();
 }
 
-Light& Light::create(LightType t, Vector3 pos, Vector3 tgt, Color col, const Shader& shader) {
+size_t Light::create(LightType type, Vector3 pos, Vector3 target, Color color, const Shader& shader) {
     // Emplace a default Light in the vector and fill it in-place.
-    Light& L = global::lights.emplace_back();
+    Light& light = global::lights.emplace_back();
 
-    L.enabled = true;
-    L.type = static_cast<int>(t);
-    L.position = pos;
-    L.target = tgt;
-    L.color = col;
+    light.enabled = true;
+    light.type = type == DIRECTIONAL_LIGHT ? 0 : 1;
+    light.position = pos;
+    light.target = Vector3Normalize(Vector3Subtract(target, pos));
+    light.color = color;
 
-    L.id = global::next_light_id++;
+    light.id = global::next_light_id++;
     // NOTE: uniform names must match your shader
-    L.enabled_loc  = GetShaderLocation(shader, TextFormat("lights[%i].enabled",  L.id));
-    L.type_loc     = GetShaderLocation(shader, TextFormat("lights[%i].type",     L.id));
-    L.position_loc = GetShaderLocation(shader, TextFormat("lights[%i].position", L.id));
-    L.target_loc   = GetShaderLocation(shader, TextFormat("lights[%i].target",   L.id));
-    L.color_loc    = GetShaderLocation(shader, TextFormat("lights[%i].color",    L.id));
+    light.enabled_loc  = GetShaderLocation(shader, TextFormat("lights[%i].enabled",  light.id));
+    light.type_loc     = GetShaderLocation(shader, TextFormat("lights[%i].type",     light.id));
+    light.position_loc = GetShaderLocation(shader, TextFormat("lights[%i].position", light.id));
+    light.target_loc   = GetShaderLocation(shader, TextFormat("lights[%i].target",   light.id));
+    light.color_loc    = GetShaderLocation(shader, TextFormat("lights[%i].color",    light.id));
     // If you actually use attenuation in the shader, set it too:
     // L.attenuationLoc = GetShaderLocation(shader, TextFormat("lights[%i].attenuation", L.id));
-    L.texture_loc = L.id + 10; //todo no idea what this does
-
-    L.vp_loc = GetShaderLocation(shader, TextFormat("lightVP[%i]", L.id));
-    L.shadow_map_loc = GetShaderLocation(shader, TextFormat("shadowMap[%i]", L.id));
-    auto res = SHADOWMAP_RESOLUTION;
-    SetShaderValue(shader, GetShaderLocation(shader, "shadowMapResolution"), &res, SHADER_UNIFORM_INT);
+    light.texture_loc = light.id + 10; // the 10 is kinda arbitrary
+    light.vp_loc = GetShaderLocation(shader, TextFormat("lightVP%i", light.id));
+    light.shadow_map_loc = GetShaderLocation(shader, TextFormat("shadowMap%i", light.id));
 
     // Light Camera for the shadow mapping algorithm
-    L.light_camera = {
-        pos,
-        tgt,
+    light.light_camera = {
+        light.position,
+        light.target,
         { 0.0f, 1.0f, 0.0f },
         32.0f,
         CAMERA_ORTHOGRAPHIC
     };
 
     // Shadow Map
-    L.shadow_map = new raylib::RenderTexture2D();
-    L.shadow_map->id = rlLoadFramebuffer(); // load an empty framebuffer
-    L.shadow_map->texture.width = SHADOWMAP_RESOLUTION;
-    L.shadow_map->texture.height = SHADOWMAP_RESOLUTION;
-    if (L.shadow_map->id > 0) {
-        rlEnableFramebuffer(L.shadow_map->id);
+    light.shadow_map = new raylib::RenderTexture2D();
+    auto fbo = rlLoadFramebuffer(); // load an empty framebuffer
+    light.shadow_map->id = fbo;
+    light.shadow_map->texture.width = SHADOWMAP_RESOLUTION;
+    light.shadow_map->texture.height = SHADOWMAP_RESOLUTION;
+    if (fbo > 0) {
+        rlEnableFramebuffer(fbo);
 
         // Create depth texture
-        L.shadow_map->depth.id = rlLoadTextureDepth(SHADOWMAP_RESOLUTION, SHADOWMAP_RESOLUTION, false);
-        L.shadow_map->depth.width = SHADOWMAP_RESOLUTION;
-        L.shadow_map->depth.height = SHADOWMAP_RESOLUTION;
-        L.shadow_map->depth.format = 19; // DEPTH_COMPONENT_24BIT?
-        L.shadow_map->depth.mipmaps = 1;
+        light.shadow_map->depth.id = rlLoadTextureDepth(SHADOWMAP_RESOLUTION, SHADOWMAP_RESOLUTION, false);
+        light.shadow_map->depth.width = SHADOWMAP_RESOLUTION;
+        light.shadow_map->depth.height = SHADOWMAP_RESOLUTION;
+        light.shadow_map->depth.format = PIXELFORMAT_COMPRESSED_ETC2_RGB; // DEPTH_COMPONENT_24BIT?
+        light.shadow_map->depth.mipmaps = 1;
 
         // Attach depth texture to framebuffer
-        rlFramebufferAttach(L.shadow_map->id, L.shadow_map->depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
+        rlFramebufferAttach(fbo, light.shadow_map->depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
 
         // Check if framebuffer is complete with attachments
-        if (rlFramebufferComplete(L.shadow_map->id))
-            TRACELOG(LOG_INFO, "FBO: [ID %i] Framebuffer object created successfully", shadow_map.id);
+        if (rlFramebufferComplete(fbo) > 0)
+            TRACELOG(LOG_INFO, "FBO: [ID %i] Framebuffer object created successfully", fbo);
+        else
+            TRACELOG(LOG_WARNING, "FBO: [ID %i] Framebuffer object created unsuccessfully", fbo);
 
         rlDisableFramebuffer();
     }
     else TRACELOG(LOG_WARNING, "FBO: Shadowmap frambuffer object can not be created!");
 
-    return L;
+    return global::lights.size() - 1;
 }
 
 void Light::update(Shader shader) {
@@ -351,6 +376,61 @@ bool global::isInRenderDistance(const Vector3 v) {
     // TODO (optimisation) this should be rewritten so that it doesn't use a sqrt operation
     return Vector3Distance(camera.position, v) <= render_distance
     || !limit_render_distance;
+}
+
+std::string global::loadFile(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open file: " + path);
+    }
+
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+
+}
+
+raylib::Shader global::loadAndPatchShader(const std::string& shader_path, int light_count) {
+    std::string vertex = loadFile(shader_path + ".vs");
+    std::string fragment = loadFile(shader_path + ".fs");
+
+    // Regex for finding the declaration in the file
+    static const std::regex shadow_decl{
+        R"(\buniform\s+sampler2D\s+shadowMap\b\s*;)",
+        std::regex::ECMAScript
+    };
+    static const std::regex vp_decl{
+        R"(\buniform\s+mat4\s+lightVP\b\s*;)",
+        std::regex::ECMAScript
+    };
+    static const std::regex shadow_get_decl{R"(GetShadowMapFunction)", std::regex::ECMAScript};
+    static const std::regex vp_get_decl{R"(GetLightVPFunction)", std::regex::ECMAScript};
+    static const std::regex max_lights_define{R"(#define MAX_LIGHTS x)", std::regex::ECMAScript};
+
+    // Build replacement block
+    std::ostringstream shadow_oss, vp_oss, shadow_get_oss, vp_get_oss;
+    for (std::size_t i = 0; i < light_count; ++i) {
+        shadow_oss << "uniform sampler2D shadowMap" << i << ";\n";
+        vp_oss << "uniform mat4 lightVP" << i << ";\n";
+
+        if (i != light_count - 1) {
+            shadow_get_oss << "    if (i == " << i << ") return texture(shadowMap" << i << ", uv).r;\n";
+            vp_get_oss     << "    if (i == " << i << ") return lightVP"   << i << ";\n";
+        } else {
+            // last iterator
+            shadow_get_oss << "    return texture(shadowMap" << i << ", uv).r;";
+            vp_get_oss     << "    return lightVP"   << i << ";";
+        }
+    }
+    // Patching
+    auto fragment_patched = std::regex_replace(fragment, shadow_decl, shadow_oss.str());
+    fragment_patched = std::regex_replace(fragment_patched, vp_decl, vp_oss.str());
+    fragment_patched = std::regex_replace(fragment_patched, shadow_get_decl, shadow_get_oss.str());
+    fragment_patched = std::regex_replace(fragment_patched, vp_get_decl, vp_get_oss.str());
+    std::string new_lights_define = "#define MAX_LIGHTS " + std::to_string(light_count);
+    fragment_patched = std::regex_replace(fragment_patched, max_lights_define, new_lights_define);
+
+    return LoadShaderFromMemory(vertex.c_str(), fragment_patched.c_str());
 }
 
 void global::drawVoxelScene() {

@@ -2,6 +2,8 @@
 
 // NOTES:
 //  POINT lights are lit but NOT shadowed here (visibility = 1.0).
+//  Some of this shader is patched by the main program.
+//  This means that the shader will not work by itself.
 
 // Inputs from the vertex shader
 in vec3 fragPosition;
@@ -13,8 +15,8 @@ in vec3 fragNormal;
 uniform sampler2D texture0;   // base texture (bind a 1x1 white if untextured)
 uniform vec4 colDiffuse;      // material tint
 
-// Lighting uniforms
-#define MAX_LIGHTS        4
+// Patched at runtime
+#define MAX_LIGHTS x
 #define LIGHT_DIRECTIONAL 0
 #define LIGHT_POINT       1
 
@@ -31,9 +33,10 @@ uniform vec4  ambient;
 uniform vec3  viewPos;   // camera position (world)
 
 // Shadow maps + matrix (and texel size) per light
-uniform sampler2D shadowMap[MAX_LIGHTS];  // shadowMap[i] belongs to lights[i]
-uniform mat4      lightVP[MAX_LIGHTS];    // lightVP[i]   belongs to lights[i]
-uniform int   shadowMapResolution; // Side length (pixels)
+// shadowMap and lightVP are patched in global::loadAndPatchShader()
+uniform sampler2D shadowMap;
+uniform mat4 lightVP;
+uniform int shadowMapResolution; // Side length (pixels)
 
 // Output
 out vec4 finalColor;
@@ -42,6 +45,16 @@ out vec4 finalColor;
 const float BIAS_BASE = 0.0002;  // slope-scale factor
 const float BIAS_MIN  = 0.00002; // minimum bias
 const float BIAS_EPS  = 0.00001; // small constant to reduce acne further
+
+float SampleShadowMap(int i, vec2 uv) {
+    //patched in global::loadAndPatchShader()
+GetShadowMapFunction
+}
+
+mat4 getLightVP(int i) {
+    //patched in global::loadAndPatchShader()
+GetLightVPFunction
+}
 
 void main() {
     // Base terms
@@ -86,7 +99,8 @@ void main() {
 
         if (isDirectional) {
             // Project fragment into light space -> NDC -> [0,1]
-            vec4 fragLS = lightVP[0] * vec4(fragPosition, 1.0);
+            vec4 fragLS = getLightVP(i) * vec4(fragPosition, 1.0);
+
             fragLS.xyz /= fragLS.w;
             vec3 uvz    = fragLS.xyz * 0.5 + 0.5;
 
@@ -105,7 +119,7 @@ void main() {
                 vec2 texelSize = vec2(1.0 / float(shadowMapResolution));
                 for (int sx = -1; sx <= 1; ++sx) {
                     for (int sy = -1; sy <= 1; ++sy) {
-                        float sampleDepth = texture(shadowMap[0], uvz.xy + texelSize * vec2(sx, sy)).r;
+                        float sampleDepth = SampleShadowMap(i, uvz.xy + texelSize * vec2(sx, sy));
                         if (uvz.z - bias > sampleDepth) occluded++;
                     }
                 }
@@ -120,10 +134,10 @@ void main() {
         accum += perLight * visibility;
     }
 
-    // Ambient add (example adds ambient/10)
-    vec3 ambientTerm = (texelColor.rgb * (ambient.rgb / 10.0)) * tint.rgb;
+    // Ambient add
+    vec3 ambientTerm = (texelColor.rgb * (ambient.rgb)) * tint.rgb;
 
-    // Final color (gamma corrected like example)
+    // Final color
     vec3 lit = accum + ambientTerm;
     float alpha = (texelColor * tint).a;
 
