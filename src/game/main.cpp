@@ -34,7 +34,6 @@ void global::init() {
         },
     };
 
-    // voxel_shader = LoadShader("../resources/shaders/lighting.vs", "../resources/shaders/lighting.fs");
     voxel_shader = loadAndPatchShader("../resources/shaders/lighting", 2);
     voxel_shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(voxel_shader, "viewPos");
 
@@ -52,8 +51,6 @@ void global::init() {
     auto sun_tgt = Vector3Scale(Vector3{48.0, 0.0, 48.0}, voxel_scale);
     camera_light_id = Light::create(DIRECTIONAL_LIGHT, camera.position, camera.target, WHITE, voxel_shader);
     sun_light_id = Light::create(DIRECTIONAL_LIGHT, sun_pos, sun_tgt, WHITE, voxel_shader);
-
-    lights[sun_light_id].enabled = true;
 
     // Voxels
     voxel_grids = std::vector<VoxelGrid*>();
@@ -192,17 +189,10 @@ void global::mainLoop() {
 
     // PASS 1: Render all objects into the shadow map render texture
     for (Light& light : lights) {
-        // if (!light.shadow_map || !light.enabled) continue;
-
-        BeginTextureMode(*light.shadow_map);
-        {
-            // std::cout << light.id << ' ' << light.shadow_map->id << std::endl;
-
+        BeginTextureMode(*light.shadow_map); {
             ClearBackground(WHITE);
-
             if (light.enabled) {
-                BeginMode3D(light.light_camera);
-                {
+                BeginMode3D(light.light_camera); {
                     light_view = rlGetMatrixModelview();
                     light_proj = rlGetMatrixProjection();
                     drawVoxelScene();
@@ -211,36 +201,24 @@ void global::mainLoop() {
             }
         }
         EndTextureMode();
-
-        // Update
+        // Update lightVP
         light.light_view_proj = MatrixMultiply(light_view, light_proj);
     }
-
     // PASS 2: Drawing
-    BeginDrawing();
-    {
+    BeginDrawing(); {
         ClearBackground(RAYWHITE);
-
         rlEnableShader(voxel_shader.id);
-
         for (Light& light : lights) {
             rlActiveTextureSlot(light.texture_loc);
             rlEnableTexture(light.shadow_map->depth.id);
             rlSetUniform(light.shadow_map_loc, &light.texture_loc, SHADER_UNIFORM_INT, 1);
             SetShaderValueMatrix(voxel_shader, light.vp_loc, light.light_view_proj);
-
-            // TraceLog(LOG_INFO, "light %d: unit=%d samplerLoc=%d fbo=%u depthTex=%u",
-            //     light.id, light.texture_loc, light.shadow_map_loc,
-            //     light.shadow_map->id, light.shadow_map->depth.id);
         }
-
-        BeginMode3D(camera);
-        {
+        BeginMode3D(camera); {
             drawVoxelScene();
 
             // Shader Mode is only necessary for immediate draw calls
-            BeginShaderMode(voxel_shader);
-            {
+            BeginShaderMode(voxel_shader); {
                 // Test Cube
                 DrawCube(Vector3{0.0, 0.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);
             }
@@ -253,15 +231,11 @@ void global::mainLoop() {
             }
         }
         EndMode3D();
-
-        // DrawTextureRec(lights[camera_light_id].shadow_map->depth,
-        //             Rectangle{0, 0, float(SHADOWMAP_RESOLUTION), -float(SHADOWMAP_RESOLUTION)}, (Vector2){10, 10}, RED);
     }
     EndDrawing();
 }
 
 size_t Light::create(LightType type, Vector3 pos, Vector3 target, Color color, const Shader& shader) {
-    // Emplace a default Light in the vector and fill it in-place.
     Light& light = global::lights.emplace_back();
 
     light.enabled = true;
@@ -271,19 +245,16 @@ size_t Light::create(LightType type, Vector3 pos, Vector3 target, Color color, c
     light.color = color;
 
     light.id = global::next_light_id++;
-    // NOTE: uniform names must match your shader
     light.enabled_loc  = GetShaderLocation(shader, TextFormat("lights[%i].enabled",  light.id));
     light.type_loc     = GetShaderLocation(shader, TextFormat("lights[%i].type",     light.id));
     light.position_loc = GetShaderLocation(shader, TextFormat("lights[%i].position", light.id));
     light.target_loc   = GetShaderLocation(shader, TextFormat("lights[%i].target",   light.id));
     light.color_loc    = GetShaderLocation(shader, TextFormat("lights[%i].color",    light.id));
-    // If you actually use attenuation in the shader, set it too:
     // L.attenuationLoc = GetShaderLocation(shader, TextFormat("lights[%i].attenuation", L.id));
     light.texture_loc = light.id + 10; // the 10 is kinda arbitrary
     light.vp_loc = GetShaderLocation(shader, TextFormat("lightVP%i", light.id));
     light.shadow_map_loc = GetShaderLocation(shader, TextFormat("shadowMap%i", light.id));
 
-    // Light Camera for the shadow mapping algorithm
     light.light_camera = {
         light.position,
         light.target,
@@ -319,7 +290,7 @@ size_t Light::create(LightType type, Vector3 pos, Vector3 target, Color color, c
 
         rlDisableFramebuffer();
     }
-    else TRACELOG(LOG_WARNING, "FBO: Shadowmap frambuffer object can not be created!");
+    else TraceLog(LOG_WARNING, "FBO: Shadowmap framebuffer object can not be created!");
 
     TraceLog(LOG_DEBUG, "[Light] %zu: unit=%d locSamp=%d fbo=%u depthTex=%u pos=(%.2f,%.2f,%.2f) tgt=(%.2f,%.2f,%.2f)",
         light.id, light.texture_loc, light.shadow_map_loc,
@@ -376,7 +347,7 @@ Light::Light(Light&& other) noexcept
     , color(other.color)
     , attenuation(other.attenuation)
     , light_camera(other.light_camera)
-    , shadow_map(other.shadow_map)                   // take ownership
+    , shadow_map(other.shadow_map) // take ownership
     , light_view_proj(other.light_view_proj)
     , enabled_loc(other.enabled_loc)
     , type_loc(other.type_loc)
@@ -388,7 +359,6 @@ Light::Light(Light&& other) noexcept
     , shadow_map_loc(other.shadow_map_loc)
     , texture_loc(other.texture_loc)
 {
-    // leave 'other' in a destructible state
     other.shadow_map = nullptr;
 }
 
@@ -402,33 +372,29 @@ Light& Light::operator=(Light&& other) noexcept {
             }
             delete shadow_map;
         }
-
-        // Trivially copy POD/aggregate members
-        id           = other.id;
-        type         = other.type;
-        enabled      = other.enabled;
-        position     = other.position;
-        target       = other.target;
-        color        = other.color;
-        attenuation  = other.attenuation;
-
-        light_camera    = other.light_camera;
-        light_view_proj = other.light_view_proj;
-
         // Take ownership of the render texture pointer
         shadow_map   = other.shadow_map;
         other.shadow_map = nullptr;
 
-        // Shader locations (just copy)
-        enabled_loc     = other.enabled_loc;
-        type_loc        = other.type_loc;
-        position_loc    = other.position_loc;
-        target_loc      = other.target_loc;
-        color_loc       = other.color_loc;
+        // Copies
+        id = other.id;
+        type = other.type;
+        enabled = other.enabled;
+        position = other.position;
+        target = other.target;
+        color = other.color;
+        attenuation = other.attenuation;
+        light_camera = other.light_camera;
+        light_view_proj = other.light_view_proj;
+        enabled_loc = other.enabled_loc;
+        type_loc = other.type_loc;
+        position_loc = other.position_loc;
+        target_loc = other.target_loc;
+        color_loc = other.color_loc;
         attenuation_loc = other.attenuation_loc;
-        vp_loc          = other.vp_loc;
-        shadow_map_loc  = other.shadow_map_loc;
-        texture_loc     = other.texture_loc;
+        vp_loc = other.vp_loc;
+        shadow_map_loc = other.shadow_map_loc;
+        texture_loc = other.texture_loc;
     }
     return *this;
 }
