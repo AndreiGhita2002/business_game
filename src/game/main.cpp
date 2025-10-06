@@ -47,8 +47,8 @@ void global::init() {
 
     // Create lights
     lights = std::vector<Light>();
-    auto sun_pos = Vector3Scale(Vector3{32.0, 8.0, 32.0}, voxel_scale);
-    auto sun_tgt = Vector3Scale(Vector3{48.0, 0.0, 48.0}, voxel_scale);
+    auto sun_pos = Vector3{32.0, 8.0, 32.0};
+    auto sun_tgt = Vector3{48.0, 0.0, 48.0};
     camera_light_id = Light::create(DIRECTIONAL_LIGHT, camera.position, camera.target, WHITE, voxel_shader);
     sun_light_id = Light::create(DIRECTIONAL_LIGHT, sun_pos, sun_tgt, WHITE, voxel_shader);
 
@@ -503,7 +503,7 @@ void global::drawVoxelScene() {
 
 void global::drawVoxelModel(const ModelInfo& model_info) {
     // Offset
-    auto offset = Vector3Scale(model_info.transform.translation, voxel_scale);
+    auto offset = model_info.transform.translation;
 
     // Rotation
     auto axis = Vector3{};
@@ -511,7 +511,7 @@ void global::drawVoxelModel(const ModelInfo& model_info) {
     QuaternionToAxisAngle(model_info.transform.rotation, &axis, &angle);
 
     // Scale
-    auto scale = Vector3Scale(model_info.transform.scale, voxel_scale);
+    auto scale = model_info.transform.scale;
 
     // Drawing the model
     DrawModelEx(model_info.model, offset,
