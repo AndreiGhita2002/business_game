@@ -8,6 +8,8 @@
 #include <RenderTexture.hpp>
 #include <Shader.hpp>
 #include <vector>
+
+#include "VoxelEditor.hpp"
 #include "voxel/VoxelMap.hpp"
 
 #define SHADOWMAP_RESOLUTION 1024
@@ -61,7 +63,7 @@ struct Light {
 
 
 namespace global {
-    inline float voxel_scale = 0.2f;
+    inline float voxel_scale = 1.0f;
     //TODO (Broken!) render circle is somehow not centered at the camera
     // has something to do with voxel_scale; it works perfectly if voxel_scale=0
     inline float render_distance = 128.0f;
@@ -79,6 +81,8 @@ namespace global {
 
     inline std::vector<VoxelGrid*> voxel_grids;
     inline VoxelMap* game_map;
+
+    inline VoxelEditor voxel_editor;
 
     // Main Functions, only called inside main
     static void init();
@@ -102,5 +106,7 @@ namespace global {
 }
 
 Vector3 apply_transform(Vector3 v, const Transform &t);
+
+Transform transform_transform(const Transform& base, const Transform& applied);
 
 #endif //BUSINESS_GAME_MAIN_HPP

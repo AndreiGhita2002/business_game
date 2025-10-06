@@ -16,6 +16,11 @@ SingleChunkGrid::SingleChunkGrid(const VoxelColourMap &voxel_colours) {
     model = {};
 }
 
+std::string& SingleChunkGrid::get_grid_type() {
+    static std::string TYPE = "SingleChunkGrid";
+    return TYPE;
+}
+
 Int2 SingleChunkGrid::get_size() {
     return Int2(size.x, size.y);
 }
@@ -38,6 +43,13 @@ void SingleChunkGrid::update_models() {
         }
     } else if (model.has_value()) {
         model->do_render = false;
+    }
+}
+
+void SingleChunkGrid::set_transform(Transform new_transform) {
+    transform = new_transform;
+    if (model.has_value()) {
+        model->transform = new_transform;
     }
 }
 

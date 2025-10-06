@@ -17,10 +17,12 @@ public:
     VoxelMap(uint32_t size_x, uint32_t size_y);
     ~VoxelMap() override;
 
+    std::string& get_grid_type() override;
     VoxelID* get_voxel(Int3 pos) override;
     Int2 get_size() override;
     void update_models() override;
     std::vector<ModelInfo*> get_models() override;
+    void set_transform(Transform new_transform) override;
 
     Int2 get_chunk_count() const;
     VoxelChunk* get_chunk(Int2 pos);

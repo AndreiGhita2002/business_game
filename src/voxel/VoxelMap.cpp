@@ -63,6 +63,11 @@ VoxelMap::~VoxelMap() {
     chunk_models.clear();
 }
 
+std::string & VoxelMap::get_grid_type() {
+    static std::string TYPE = "VoxelMap";
+    return TYPE;
+}
+
 void VoxelMap::update_models() {
     for (auto it = chunks.begin(); it != chunks.end(); ++it) {
         auto chunk_pos = it->first;
@@ -100,6 +105,13 @@ std::vector<ModelInfo*> VoxelMap::get_models() {
         }
     }
     return out;
+}
+
+void VoxelMap::set_transform(Transform new_transform) {
+    transform = new_transform;
+    for (auto it = chunk_models.begin(); it != chunk_models.end(); ++it) {
+        it->second.transform = transform_transform(it->second.transform, new_transform);
+    }
 }
 
 VoxelChunk* VoxelMap::get_chunk(Int2 pos) {

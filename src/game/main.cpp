@@ -67,6 +67,8 @@ void global::init() {
     single_chunk_grid->transform.scale = Vector3(2.0f, 2.0f, 2.0f);
     single_chunk_grid->was_updated = true;
     voxel_grids.emplace_back(single_chunk_grid);
+
+    voxel_editor = VoxelEditor();
 }
 
 void global::shutdown() {
@@ -78,8 +80,8 @@ void global::shutdown() {
 }
 
 void global::updateCamera() {
-    const float moveSpeed = 12.0f * GetFrameTime();
-    const float panSpeed  = 3.0f * GetFrameTime();
+    const float camera_trans_speed = 24.0f * GetFrameTime();
+    const float camera_pan_speed  = 6.0f * GetFrameTime();
 
     // --- Build camera-relative basis on the XZ plane ---
     float dx = camera.target.x - camera.position.x;
@@ -110,8 +112,8 @@ void global::updateCamera() {
     float mz = fz * fwd + rz * strafe;
     float mLen = sqrtf(mx*mx + mz*mz);
     if (mLen > 1e-6f) {
-        mx = (mx / mLen) * moveSpeed;
-        mz = (mz / mLen) * moveSpeed;
+        mx = (mx / mLen) * camera_trans_speed;
+        mz = (mz / mLen) * camera_trans_speed;
 
         camera.position.x += mx;
         camera.position.z += mz;
@@ -121,7 +123,7 @@ void global::updateCamera() {
 
     // --- Panning (yaw around position) ---
     if (IsKeyDown(KEY_Q) || IsKeyDown(KEY_E)) {
-        float angle = IsKeyDown(KEY_Q) ? -panSpeed : panSpeed;
+        float angle = IsKeyDown(KEY_Q) ? -camera_pan_speed : camera_pan_speed;
 
         float cosA = cosf(angle);
         float sinA = sinf(angle);
@@ -138,12 +140,12 @@ void global::updateCamera() {
 
     // --- Vertical movement ---
     if (IsKeyDown(KEY_F)) {
-        camera.position.y += moveSpeed;
-        camera.target.y   += moveSpeed;
+        camera.position.y += camera_trans_speed;
+        camera.target.y   += camera_trans_speed;
     }
     if (IsKeyDown(KEY_C)) {
-        camera.position.y -= moveSpeed;
-        camera.target.y   -= moveSpeed;
+        camera.position.y -= camera_trans_speed;
+        camera.target.y   -= camera_trans_speed;
     }
 
     // --- Shader Update ---
@@ -183,6 +185,7 @@ void global::mainLoop() {
     updateCamera();
     updateVoxelMesh();
     updateLights();
+    voxel_editor.update();
 
     Matrix light_view = {};
     Matrix light_proj = {};
@@ -255,6 +258,7 @@ size_t Light::create(LightType type, Vector3 pos, Vector3 target, Color color, c
     light.vp_loc = GetShaderLocation(shader, TextFormat("lightVP%i", light.id));
     light.shadow_map_loc = GetShaderLocation(shader, TextFormat("shadowMap%i", light.id));
 
+    //todo find a better camera configuration for lights
     light.light_camera = {
         light.position,
         light.target,
@@ -412,6 +416,22 @@ Vector3 apply_transform(const Vector3 v, const Transform &t) {
 
     // Translate
     return Vector3Add(rotated, t.translation);
+}
+
+Transform transform_transform(const Transform &base, const Transform &applied) {
+    Transform result;
+
+    result.scale.x = base.scale.x * applied.scale.x;
+    result.scale.y = base.scale.y * applied.scale.y;
+    result.scale.z = base.scale.z * applied.scale.z;
+
+    result.rotation = QuaternionMultiply(applied.rotation, base.rotation);
+
+    Vector3 scaled = Vector3Multiply(base.translation, applied.scale);
+    Vector3 rotated = Vector3RotateByQuaternion(scaled, applied.rotation);
+    result.translation = Vector3Add(rotated, applied.translation);
+
+    return result;
 }
 
 bool global::isInRenderDistance(const Vector3 v) {

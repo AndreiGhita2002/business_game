@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 4.0)
 project(business_game)
+include(FetchContent)
 
 # raylib
 find_package(raylib QUIET)
@@ -29,6 +30,14 @@ if(NOT raylib_cpp_FOUND)
     FetchContent_MakeAvailable(raylib_cpp)
 endif()
 
+# raygui
+FetchContent_Declare(
+        raygui
+        GIT_REPOSITORY https://github.com/raysan5/raygui.git
+        GIT_TAG master
+)
+FetchContent_MakeAvailable(raygui)
+
 # C++ standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -45,11 +54,14 @@ add_executable(${PROJECT_NAME}
         src/voxel/VoxelGrid.hpp
         src/voxel/SingleChunkGrid.cpp
         src/voxel/SingleChunkGrid.hpp
+        src/game/VoxelEditor.cpp
+        src/game/VoxelEditor.hpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/includes
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${raygui_SOURCE_DIR}/src
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE raylib raylib_cpp)
 

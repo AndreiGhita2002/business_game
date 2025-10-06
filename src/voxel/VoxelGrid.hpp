@@ -6,6 +6,7 @@
 #define BUSINESS_GAME_VOXELGRID_HPP
 #include <raylib.h>
 #include <map>
+#include <string>
 
 // REMINDER: Z goes UP/DOWN
 
@@ -58,6 +59,7 @@ public:
     Transform transform;
     VoxelColourMap voxel_colours;
 
+    virtual std::string& get_grid_type() = 0;
     virtual Int2 get_size() = 0;
     virtual VoxelID* get_voxel(Int3 grid_pos) = 0;
     virtual void update_models() = 0;
@@ -68,8 +70,9 @@ public:
     // managed by their respective grid
     virtual std::vector<ModelInfo*> get_models() = 0;
 
-    virtual ~VoxelGrid() = default;
+    virtual void set_transform(Transform new_transform) = 0;
 
+    virtual ~VoxelGrid() = default;
 protected:
     // helper: floor division/modulo that work for negatives
     static int floordiv(const int a, const int b) {
