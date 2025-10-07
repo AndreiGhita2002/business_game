@@ -12,7 +12,7 @@ public:
     VoxelChunk data;
     bool was_updated;
 
-    explicit SingleChunkGrid(const VoxelColourMap &voxel_colours);
+    explicit SingleChunkGrid(VoxelView* view, const VoxelColourMap &voxel_colours);
 
     std::string& get_grid_type() override;
     Int2 get_size() override;

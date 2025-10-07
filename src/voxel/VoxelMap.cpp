@@ -4,13 +4,15 @@
 
 #include "voxel/VoxelMap.hpp"
 
-#include <raymath.h>
+#include "PerlinNoise.hpp"
+#include <raylib-cpp.hpp>
 
 #include "voxel/VoxelMesher.hpp"
-#include "PerlinNoise.hpp"
 #include "game/main.hpp"
 
-VoxelMap::VoxelMap(const uint32_t size_x, const uint32_t size_y) {
+VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y)
+    : VoxelGrid(view)
+{
     this->size = Int2(size_x, size_y);
     this->chunk_count = Int2(
         size_x / 16 + (size_x % 16 ? 1 : 0),
@@ -76,15 +78,15 @@ void VoxelMap::update_models() {
 
         // calculating the position of the chunk in render space
         auto model_transform = transform;
-        model_transform.translation += Vector3{
+        model_transform.translation = Vector3Add(model_transform.translation, Vector3{
             static_cast<float>(it->first.x) * (CHUNK_SIZE - 1),
             0.0,
             static_cast<float>(it->first.y) * (CHUNK_SIZE - 1)
-        };
+        });
 
         // render distance check
         if (chunk_model != chunk_models.end() && global::limit_render_distance) {
-            chunk_model->second.do_render = global::isInRenderDistance(model_transform.translation);
+            chunk_model->second.do_render = view->isInRenderDistance(model_transform.translation);
         }
 
         if (chunk_was_updated[chunk_pos]) {

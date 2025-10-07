@@ -7,6 +7,7 @@
 #include "main.hpp"
 
 void VoxelEditor::update() {
+    /*
     if (current_grid) {
         // move grid with camera
         auto camera_delta = Vector3Subtract(global::camera.position, last_camera_pos);
@@ -81,9 +82,11 @@ void VoxelEditor::update() {
             }
         }
     }
+    */
 }
 
 void VoxelEditor::set_grid(VoxelGrid* grid) {
+    /*
     TraceLog(LOG_DEBUG, "[EDITOR] Grid set!");
 
     current_grid = grid;
@@ -104,6 +107,7 @@ void VoxelEditor::set_grid(VoxelGrid* grid) {
     });
 
     last_camera_pos = global::camera.position;
+    */
 }
 
 VoxelGrid *VoxelEditor::pop_grid() {

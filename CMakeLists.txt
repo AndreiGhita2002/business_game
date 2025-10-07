@@ -56,6 +56,11 @@ add_executable(${PROJECT_NAME}
         src/voxel/SingleChunkGrid.hpp
         src/game/VoxelEditor.cpp
         src/game/VoxelEditor.hpp
+        src/game/ViewNode.hpp
+        src/game/VoxelView.cpp
+        src/game/VoxelView.hpp
+        src/game/Light.cpp
+        src/game/Light.hpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

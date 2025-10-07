@@ -8,7 +8,12 @@
 #include <map>
 #include <string>
 
+// #include "game/VoxelView.hpp"
+class VoxelView;
+
 // REMINDER: Z goes UP/DOWN
+
+inline Transform identity();
 
 #define CHUNK_SIZE 16
 using VoxelID = uint8_t;
@@ -72,8 +77,12 @@ public:
 
     virtual void set_transform(Transform new_transform) = 0;
 
+    explicit VoxelGrid(VoxelView* view) : transform(identity()), view(view) {}
     virtual ~VoxelGrid() = default;
 protected:
+    // The view responsible for drawing this grid;
+    VoxelView* view;
+
     // helper: floor division/modulo that work for negatives
     static int floordiv(const int a, const int b) {
         int q = a / b;

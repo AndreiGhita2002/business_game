@@ -5,6 +5,9 @@
 #ifndef BUSINESS_GAME_GAMEMAP_HPP
 #define BUSINESS_GAME_GAMEMAP_HPP
 #include <map>
+
+// #include "game/VoxelView.hpp"
+// class VoxelView;
 #include "voxel/VoxelGrid.hpp"
 
 class VoxelMap final : public VoxelGrid {
@@ -14,7 +17,7 @@ public:
     std::map<Int2, bool> chunk_was_updated;
     std::map<Int2, ModelInfo> chunk_models;
 
-    VoxelMap(uint32_t size_x, uint32_t size_y);
+    VoxelMap(VoxelView* view, uint32_t size_x, uint32_t size_y);
     ~VoxelMap() override;
 
     std::string& get_grid_type() override;

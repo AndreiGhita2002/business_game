@@ -7,7 +7,9 @@
 #include "VoxelMesher.hpp"
 #include "game/main.hpp"
 
-SingleChunkGrid::SingleChunkGrid(const VoxelColourMap &voxel_colours) {
+SingleChunkGrid::SingleChunkGrid(VoxelView* view, const VoxelColourMap &voxel_colours)
+    : VoxelGrid(view)
+{
     this->voxel_colours = voxel_colours;
     transform = identity();
     size = Int2(CHUNK_SIZE, CHUNK_SIZE);
@@ -32,7 +34,7 @@ VoxelID* SingleChunkGrid::get_voxel(Int3 grid_pos) {
 }
 
 void SingleChunkGrid::update_models() {
-    if (global::isInRenderDistance(transform.translation)) {
+    if (view->isInRenderDistance(transform.translation)) {
         if (was_updated) {
             auto meshes = build_chunk_mesh(data, Vector3{0.0,0.0,0.0}, 1.0f);
             auto new_model = build_chunk_model(meshes, *voxel_colours);

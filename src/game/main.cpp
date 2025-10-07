@@ -24,15 +24,8 @@
 void global::init() {
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
     raylib::Window::Init(1600, 900, "business game");
-    camera = {
-        {
-            { 10.0f, 5.0f, 0.0f },
-            { 0.0f, 0.0f, 0.0f },
-            { 0.0f, 1.0f, 0.0f },
-            45.0f,
-            0
-        },
-    };
+
+    root_view = std::make_unique<ViewNode>(nullptr);
 
     voxel_shader = loadAndPatchShader("../resources/shaders/lighting", 2);
     voxel_shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(voxel_shader, "viewPos");
@@ -45,30 +38,11 @@ void global::init() {
     auto res = SHADOWMAP_RESOLUTION;
     SetShaderValue(voxel_shader, GetShaderLocation(voxel_shader, "shadowMapResolution"), &res, SHADER_UNIFORM_INT);
 
-    // Create lights
-    lights = std::vector<Light>();
-    auto sun_pos = Vector3{32.0, 8.0, 32.0};
-    auto sun_tgt = Vector3{48.0, 0.0, 48.0};
-    camera_light_id = Light::create(DIRECTIONAL_LIGHT, camera.position, camera.target, WHITE, voxel_shader);
-    sun_light_id = Light::create(DIRECTIONAL_LIGHT, sun_pos, sun_tgt, WHITE, voxel_shader);
-
     // Voxels
-    voxel_grids = std::vector<VoxelGrid*>();
+    root_view->add_child(std::make_unique<VoxelView>(root_view.get(), &voxel_shader));
 
-    game_map = new VoxelMap(128, 128);
-    voxel_grids.emplace_back(game_map);
-
-    auto single_chunk_grid = new SingleChunkGrid(game_map->voxel_colours);
-    *single_chunk_grid->get_voxel(Int3(0.0,0.0,0.0)) = 3;
-    *single_chunk_grid->get_voxel(Int3(1.0,0.0,0.0)) = 3;
-    *single_chunk_grid->get_voxel(Int3(2.0,0.0,0.0)) = 3;
-    *single_chunk_grid->get_voxel(Int3(3.0,0.0,0.0)) = 3;
-    single_chunk_grid->transform.translation = Vector3(-2.0f, 6.0f, -2.0f);
-    single_chunk_grid->transform.scale = Vector3(2.0f, 2.0f, 2.0f);
-    single_chunk_grid->was_updated = true;
-    voxel_grids.emplace_back(single_chunk_grid);
-
-    voxel_editor = VoxelEditor();
+    // voxel_editor = VoxelEditor();
+    TraceLog(LOG_DEBUG, "main init finished!");
 }
 
 void global::shutdown() {
@@ -79,328 +53,11 @@ void global::shutdown() {
     raylib::Window::Close();
 }
 
-void global::updateCamera() {
-    const float camera_trans_speed = 24.0f * GetFrameTime();
-    const float camera_pan_speed  = 6.0f * GetFrameTime();
-
-    // --- Build camera-relative basis on the XZ plane ---
-    float dx = camera.target.x - camera.position.x;
-    float dz = camera.target.z - camera.position.z;
-
-    // Forward (XZ only)
-    float fLen = sqrtf(dx*dx + dz*dz);
-    if (fLen < 1e-6f) {
-        // degenerate: point some default forward to avoid NaNs
-        dx = 0.0f; dz = -1.0f; fLen = 1.0f;
-    }
-    float fx = dx / fLen;
-    float fz = dz / fLen;
-
-    // Right (perpendicular on XZ): rotate forward 90° clockwise around Y
-    float rx =  fz;
-    float rz = -fx;
-
-    // --- Input to forward/strafe amounts ---
-    float fwd = 0.0f, strafe = 0.0f;
-    if (IsKeyDown(KEY_W)) fwd += 1.0f;
-    if (IsKeyDown(KEY_S)) fwd -= 1.0f;
-    if (IsKeyDown(KEY_A)) strafe += 1.0f;
-    if (IsKeyDown(KEY_D)) strafe -= 1.0f;
-
-    // Combine and normalize so diagonals aren’t faster
-    float mx = fx * fwd + rx * strafe;
-    float mz = fz * fwd + rz * strafe;
-    float mLen = sqrtf(mx*mx + mz*mz);
-    if (mLen > 1e-6f) {
-        mx = (mx / mLen) * camera_trans_speed;
-        mz = (mz / mLen) * camera_trans_speed;
-
-        camera.position.x += mx;
-        camera.position.z += mz;
-        camera.target.x   += mx;
-        camera.target.z   += mz;
-    }
-
-    // --- Panning (yaw around position) ---
-    if (IsKeyDown(KEY_Q) || IsKeyDown(KEY_E)) {
-        float angle = IsKeyDown(KEY_Q) ? -camera_pan_speed : camera_pan_speed;
-
-        float cosA = cosf(angle);
-        float sinA = sinf(angle);
-
-        float tdx = camera.target.x - camera.position.x;
-        float tdz = camera.target.z - camera.position.z;
-
-        float ndx = tdx * cosA - tdz * sinA;
-        float ndz = tdx * sinA + tdz * cosA;
-
-        camera.target.x = camera.position.x + ndx;
-        camera.target.z = camera.position.z + ndz;
-    }
-
-    // --- Vertical movement ---
-    if (IsKeyDown(KEY_F)) {
-        camera.position.y += camera_trans_speed;
-        camera.target.y   += camera_trans_speed;
-    }
-    if (IsKeyDown(KEY_C)) {
-        camera.position.y -= camera_trans_speed;
-        camera.target.y   -= camera_trans_speed;
-    }
-
-    // --- Shader Update ---
-    float cameraPos[3] = { camera.position.x, camera.position.y, camera.position.z };
-    SetShaderValue(voxel_shader, voxel_shader.locs[SHADER_LOC_VECTOR_VIEW], cameraPos, SHADER_UNIFORM_VEC3);
-}
-
-void global::updateLights() {
-    // Light Controls
-    if (IsKeyReleased(KEY_Y)) move_camera_light = !move_camera_light;
-    if (IsKeyReleased(KEY_U)) lights[sun_light_id].enabled = !lights[sun_light_id].enabled;
-    if (IsKeyReleased(KEY_I)) lights[camera_light_id].enabled = !lights[camera_light_id].enabled;
-
-    // Camera Light
-    if (move_camera_light) {
-        lights[camera_light_id].position = camera.position;
-        lights[camera_light_id].target = camera.target;
-    }
-
-    if (IsKeyPressed(KEY_O)) lights[camera_light_id].light_camera.fovy += 1.0f;
-    if (IsKeyPressed(KEY_P)) lights[camera_light_id].light_camera.fovy -= 1.0f;
-
-    // Update
-    for (Light &light : lights) {
-        light.update(voxel_shader);
-    }
-}
-
-void global::updateVoxelMesh() {
-    for (VoxelGrid* grid : voxel_grids) {
-        grid->update_models();
-    }
-}
-
 void global::mainLoop() {
-    // Update
-    updateCamera();
-    updateVoxelMesh();
-    updateLights();
-    voxel_editor.update();
-
-    Matrix light_view = {};
-    Matrix light_proj = {};
-
-    // PASS 1: Render all objects into the shadow map render texture
-    for (Light& light : lights) {
-        BeginTextureMode(*light.shadow_map); {
-            ClearBackground(WHITE);
-            if (light.enabled) {
-                BeginMode3D(light.light_camera); {
-                    light_view = rlGetMatrixModelview();
-                    light_proj = rlGetMatrixProjection();
-                    drawVoxelScene();
-                }
-                EndMode3D();
-            }
-        }
-        EndTextureMode();
-        // Update lightVP
-        light.light_view_proj = MatrixMultiply(light_view, light_proj);
-    }
-    // PASS 2: Drawing
-    BeginDrawing(); {
-        ClearBackground(RAYWHITE);
-        rlEnableShader(voxel_shader.id);
-        for (Light& light : lights) {
-            rlActiveTextureSlot(light.texture_loc);
-            rlEnableTexture(light.shadow_map->depth.id);
-            rlSetUniform(light.shadow_map_loc, &light.texture_loc, SHADER_UNIFORM_INT, 1);
-            SetShaderValueMatrix(voxel_shader, light.vp_loc, light.light_view_proj);
-        }
-        BeginMode3D(camera); {
-            drawVoxelScene();
-
-            // Shader Mode is only necessary for immediate draw calls
-            BeginShaderMode(voxel_shader); {
-                // Test Cube
-                DrawCube(Vector3{0.0, 0.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);
-            }
-            EndShaderMode();
-
-            // Draw spheres to show where the lights are
-            for (Light& light : lights) {
-                if (light.enabled) DrawSphereEx(light.position, 0.2f, 8, 8, light.color);
-                else DrawSphereWires(light.position, 0.2f, 8, 8, ColorAlpha(light.color, 0.3f));
-            }
-        }
-        EndMode3D();
-    }
-    EndDrawing();
-}
-
-size_t Light::create(LightType type, Vector3 pos, Vector3 target, Color color, const Shader& shader) {
-    Light& light = global::lights.emplace_back();
-
-    light.enabled = true;
-    light.type = type == DIRECTIONAL_LIGHT ? 0 : 1;
-    light.position = pos;
-    light.target = target;
-    light.color = color;
-
-    light.id = global::next_light_id++;
-    light.enabled_loc  = GetShaderLocation(shader, TextFormat("lights[%i].enabled",  light.id));
-    light.type_loc     = GetShaderLocation(shader, TextFormat("lights[%i].type",     light.id));
-    light.position_loc = GetShaderLocation(shader, TextFormat("lights[%i].position", light.id));
-    light.target_loc   = GetShaderLocation(shader, TextFormat("lights[%i].target",   light.id));
-    light.color_loc    = GetShaderLocation(shader, TextFormat("lights[%i].color",    light.id));
-    // L.attenuationLoc = GetShaderLocation(shader, TextFormat("lights[%i].attenuation", L.id));
-    light.texture_loc = light.id + 10; // the 10 is kinda arbitrary
-    light.vp_loc = GetShaderLocation(shader, TextFormat("lightVP%i", light.id));
-    light.shadow_map_loc = GetShaderLocation(shader, TextFormat("shadowMap%i", light.id));
-
-    //todo find a better camera configuration for lights
-    light.light_camera = {
-        light.position,
-        light.target,
-        { 0.0f, 1.0f, 0.0f },
-        32.0f,
-        CAMERA_ORTHOGRAPHIC
-    };
-
-    // Shadow Map
-    light.shadow_map = new raylib::RenderTexture2D();
-    auto fbo = rlLoadFramebuffer(); // load an empty framebuffer
-    light.shadow_map->id = fbo;
-    light.shadow_map->texture.width = SHADOWMAP_RESOLUTION;
-    light.shadow_map->texture.height = SHADOWMAP_RESOLUTION;
-    if (fbo > 0) {
-        rlEnableFramebuffer(fbo);
-
-        // Create depth texture
-        light.shadow_map->depth.id = rlLoadTextureDepth(SHADOWMAP_RESOLUTION, SHADOWMAP_RESOLUTION, false);
-        light.shadow_map->depth.width = SHADOWMAP_RESOLUTION;
-        light.shadow_map->depth.height = SHADOWMAP_RESOLUTION;
-        // light.shadow_map->depth.format = PIXELFORMAT_COMPRESSED_ETC2_RGB; // Already written by rlLoadTextureDepth
-        light.shadow_map->depth.mipmaps = 1;
-
-        // Attach depth texture to framebuffer
-        rlFramebufferAttach(fbo, light.shadow_map->depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
-
-        // Check if framebuffer is complete with attachments
-        if (rlFramebufferComplete(fbo) > 0)
-            TRACELOG(LOG_INFO, "FBO: [ID %i] Framebuffer object created successfully", fbo);
-        else
-            TRACELOG(LOG_WARNING, "FBO: [ID %i] Framebuffer object created unsuccessfully", fbo);
-
-        rlDisableFramebuffer();
-    }
-    else TraceLog(LOG_WARNING, "FBO: Shadowmap framebuffer object can not be created!");
-
-    TraceLog(LOG_DEBUG, "[Light] %zu: unit=%d locSamp=%d fbo=%u depthTex=%u pos=(%.2f,%.2f,%.2f) tgt=(%.2f,%.2f,%.2f)",
-        light.id, light.texture_loc, light.shadow_map_loc,
-        light.shadow_map->id, light.shadow_map->depth.id,
-        light.position.x, light.position.y, light.position.z,
-        light.target.x, light.target.y, light.target.z);
-
-    return global::lights.size() - 1;
-}
-
-void Light::update(Shader shader) {
-    // Move light camera
-    light_camera.position = position;
-    light_camera.target = target;
-
-    // Send to shader light enabled state and type
-    int s_enabled = enabled ? 1 : 0;
-    SetShaderValue(shader, enabled_loc, &s_enabled, SHADER_UNIFORM_INT);
-    int s_type = (type == POINT_LIGHT) ? 1 : 0;
-    SetShaderValue(shader, type_loc, &s_type, SHADER_UNIFORM_INT);
-
-    // Send to shader light position values
-    float s_position[3] = {position.x, position.y, position.z};
-    SetShaderValue(shader, position_loc, s_position, SHADER_UNIFORM_VEC3);
-
-    // Send to shader light target position values
-    float s_target[3] = {target.x, target.y, target.z};
-    SetShaderValue(shader, target_loc, s_target, SHADER_UNIFORM_VEC3);
-
-    // Send to shader light color values
-    Vector4 s_color = { color.r/255.f, color.g/255.f, color.b/255.f, color.a/255.f };
-    SetShaderValue(shader, color_loc, &s_color, SHADER_UNIFORM_VEC4);
-}
-
-Light::~Light() {
-    if (shadow_map) {
-        // Only unload if it looks valid
-        if (shadow_map->id != 0) {
-            UnloadRenderTexture(*shadow_map);
-        }
-        delete shadow_map;
-        shadow_map = nullptr;
-    }
-    else { TraceLog(LOG_DEBUG, "[Light] %i: shadow map already freed!", id); }
-}
-
-// Move constructor
-Light::Light(Light&& other) noexcept
-    : id(other.id)
-    , type(other.type)
-    , enabled(other.enabled)
-    , position(other.position)
-    , target(other.target)
-    , color(other.color)
-    , attenuation(other.attenuation)
-    , light_camera(other.light_camera)
-    , shadow_map(other.shadow_map) // take ownership
-    , light_view_proj(other.light_view_proj)
-    , enabled_loc(other.enabled_loc)
-    , type_loc(other.type_loc)
-    , position_loc(other.position_loc)
-    , target_loc(other.target_loc)
-    , color_loc(other.color_loc)
-    , attenuation_loc(other.attenuation_loc)
-    , vp_loc(other.vp_loc)
-    , shadow_map_loc(other.shadow_map_loc)
-    , texture_loc(other.texture_loc)
-{
-    other.shadow_map = nullptr;
-}
-
-// Move assignment
-Light& Light::operator=(Light&& other) noexcept {
-    if (this != &other) {
-        // Release current ownership first
-        if (shadow_map) {
-            if (shadow_map->id != 0) {
-                UnloadRenderTexture(*shadow_map);
-            }
-            delete shadow_map;
-        }
-        // Take ownership of the render texture pointer
-        shadow_map   = other.shadow_map;
-        other.shadow_map = nullptr;
-
-        // Copies
-        id = other.id;
-        type = other.type;
-        enabled = other.enabled;
-        position = other.position;
-        target = other.target;
-        color = other.color;
-        attenuation = other.attenuation;
-        light_camera = other.light_camera;
-        light_view_proj = other.light_view_proj;
-        enabled_loc = other.enabled_loc;
-        type_loc = other.type_loc;
-        position_loc = other.position_loc;
-        target_loc = other.target_loc;
-        color_loc = other.color_loc;
-        attenuation_loc = other.attenuation_loc;
-        vp_loc = other.vp_loc;
-        shadow_map_loc = other.shadow_map_loc;
-        texture_loc = other.texture_loc;
-    }
-    return *this;
+    TraceLog(LOG_DEBUG, ".main loop");
+    // voxel_editor.update(); move to ViewNode tree
+    root_view->update(GetFrameTime());
+    root_view->render();
 }
 
 Vector3 apply_transform(const Vector3 v, const Transform &t) {
@@ -432,12 +89,6 @@ Transform transform_transform(const Transform &base, const Transform &applied) {
     result.translation = Vector3Add(rotated, applied.translation);
 
     return result;
-}
-
-bool global::isInRenderDistance(const Vector3 v) {
-    // TODO (optimisation) this should be rewritten so that it doesn't use a sqrt operation
-    return Vector3Distance(camera.position, v) <= render_distance
-    || !limit_render_distance;
 }
 
 std::string global::loadFile(const std::string& path) {
@@ -491,35 +142,6 @@ raylib::Shader global::loadAndPatchShader(const std::string& shader_path, int li
     fragment_patched = std::regex_replace(fragment_patched, max_lights_define, new_lights_define);
 
     return LoadShaderFromMemory(vertex.c_str(), fragment_patched.c_str());
-}
-
-void global::drawVoxelScene() {
-    for (VoxelGrid* grid : voxel_grids) {
-        for (ModelInfo* model_info : grid->get_models()) {
-            drawVoxelModel(*model_info);
-        }
-    }
-}
-
-void global::drawVoxelModel(const ModelInfo& model_info) {
-    // Offset
-    auto offset = model_info.transform.translation;
-
-    // Rotation
-    auto axis = Vector3{};
-    auto angle = 0.0f;
-    QuaternionToAxisAngle(model_info.transform.rotation, &axis, &angle);
-
-    // Scale
-    auto scale = model_info.transform.scale;
-
-    // Drawing the model
-    DrawModelEx(model_info.model, offset,
-        axis, angle, scale, WHITE);
-
-    // Drawing wires
-    // DrawModelWiresEx(model_info->model, offset,
-    //     axis, angle, scale, DARKGRAY);
 }
 
 int main() {
