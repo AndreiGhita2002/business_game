@@ -19,7 +19,7 @@ SingleChunkGrid::SingleChunkGrid(VoxelView* view, const VoxelColourMap &voxel_co
 }
 
 std::string& SingleChunkGrid::get_grid_type() {
-    static std::string TYPE = "SingleChunkGrid";
+    static std::string TYPE = SINGLE_CHUNK_GRID_STR;
     return TYPE;
 }
 

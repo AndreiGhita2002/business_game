@@ -4,6 +4,7 @@
 
 #include "main.hpp"
 
+#include <cfloat>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -40,6 +41,8 @@ void global::init() {
 
     // Voxels
     root_view->add_child(std::make_unique<VoxelView>(root_view.get(), &voxel_shader));
+    auto voxel_view = static_cast<VoxelView *>(root_view->child.get());
+    root_view->child->add_child(std::make_unique<VoxelEditor>(voxel_view));
 
     // voxel_editor = VoxelEditor();
     TraceLog(LOG_DEBUG, "main init finished!");
@@ -54,13 +57,11 @@ void global::shutdown() {
 }
 
 void global::mainLoop() {
-    TraceLog(LOG_DEBUG, ".main loop");
-    // voxel_editor.update(); move to ViewNode tree
     root_view->update(GetFrameTime());
     root_view->render();
 }
 
-Vector3 apply_transform(const Vector3 v, const Transform &t) {
+Vector3 apply_transform_trans(const Vector3 v, const Transform &t) {
     // Scale
     Vector3 scaled = {
         v.x * t.scale.x,
@@ -73,6 +74,66 @@ Vector3 apply_transform(const Vector3 v, const Transform &t) {
 
     // Translate
     return Vector3Add(rotated, t.translation);
+}
+
+Quaternion apply_transform_rot(Quaternion rot, const Transform &t) {
+    return QuaternionAdd(rot, t.rotation);
+}
+
+Vector3 apply_transform_scale(Vector3 scale, const Transform &t) {
+    return Vector3{
+        scale.x * t.scale.x,
+        scale.y * t.scale.y,
+        scale.z * t.scale.z
+    };
+}
+
+void apply_transform(Vector3* position, Quaternion* rotation, Vector3* scale, const Transform& t) {
+    *position = apply_transform_trans(*position, t);
+    *rotation = apply_transform_rot(*rotation, t);
+    *scale = apply_transform_scale(*scale, t);
+}
+
+VoxelGrid* find_grid_on_ray(Ray ray, const std::vector<VoxelGrid*>* voxel_grids, const char* grid_type) {
+    TraceLog(LOG_DEBUG, "Ray cast: distance=%f,%f,%f to direction=%f,%f,%f",
+            ray.position.x, ray.position.y, ray.position.z,
+            ray.direction.x, ray.direction.y, ray.direction.z
+        );
+
+    //TODO YOU WERE HERE ------------------------
+    // this still does not work!! STOP LISTENING TO CHATGPT
+
+    VoxelGrid* found_grid = nullptr;
+    RayCollision best_collision{};
+    best_collision.distance = FLT_MAX;
+
+    for (VoxelGrid* grid : *voxel_grids) {
+        // Only select SingleChunkGrids
+        if (grid->get_grid_type().compare("SingleChunkGrid") != 0)
+            continue;
+
+        //todo: transform is not copied inside for some reason!!
+        Matrix grid_mat = transform_to_matrix(grid->transform);
+
+        for (auto model : grid->get_models()) {
+            Matrix model_mat = MatrixMultiply(grid_mat, transform_to_matrix(grid->transform));
+
+            for (int i = 0; i < model->model.meshCount; ++i) {
+
+                Matrix mesh_mat = MatrixMultiply(model_mat, model->model.transform);
+                // Matrix world_mat = MatrixInvert(mesh_mat);
+
+                RayCollision c = GetRayCollisionMesh(ray, model->model.meshes[i], mesh_mat);
+
+                print_matrix(mesh_mat);
+                if (c.hit && c.distance < best_collision.distance) {
+                    best_collision = c;
+                    found_grid = grid;
+                }
+            }
+        }
+    }
+    return found_grid;
 }
 
 Transform transform_transform(const Transform &base, const Transform &applied) {
@@ -89,6 +150,18 @@ Transform transform_transform(const Transform &base, const Transform &applied) {
     result.translation = Vector3Add(rotated, applied.translation);
 
     return result;
+}
+
+Matrix transform_to_matrix(Transform t) {
+    Matrix mat = {
+        t.scale.x, 0 ,0, 0,
+        0, t.scale.y, 0, 0,
+        0, 0, t.scale.z, 0,
+        t.translation.x, t.translation.y, t.translation.z, 0
+    };
+    // Matrix rot = QuaternionToMatrix(t.rotation);
+    // return MatrixMultiply(mat, rot);
+    return mat;
 }
 
 std::string global::loadFile(const std::string& path) {
@@ -142,6 +215,15 @@ raylib::Shader global::loadAndPatchShader(const std::string& shader_path, int li
     fragment_patched = std::regex_replace(fragment_patched, max_lights_define, new_lights_define);
 
     return LoadShaderFromMemory(vertex.c_str(), fragment_patched.c_str());
+}
+
+void print_matrix(const Matrix& mat) {
+    std::cout << "[\n";
+    std::cout << "  " << mat.m0  << ", " << mat.m4  << ", " << mat.m8  << ", " << mat.m12 << "\n";
+    std::cout << "  " << mat.m1  << ", " << mat.m5  << ", " << mat.m9  << ", " << mat.m13 << "\n";
+    std::cout << "  " << mat.m2  << ", " << mat.m6  << ", " << mat.m10 << ", " << mat.m14 << "\n";
+    std::cout << "  " << mat.m3  << ", " << mat.m7  << ", " << mat.m11 << ", " << mat.m15 << "\n";
+    std::cout << "]\n";
 }
 
 int main() {

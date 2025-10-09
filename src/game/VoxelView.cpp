@@ -8,12 +8,17 @@
 #include "voxel/SingleChunkGrid.hpp"
 
 
-void VoxelView::update(float delta_time) {
-    // ViewNode::update(delta_time);
+std::string & VoxelView::get_view_type() {
+    static std::string TYPE = VOXEL_VIEW_STR;
+    return TYPE;
+}
 
+void VoxelView::update(float delta_time) {
     updateCamera();
     updateVoxelMesh();
     updateLights();
+
+    ViewNode::update(delta_time);
 }
 
 void VoxelView::render() {
@@ -69,7 +74,7 @@ void VoxelView::render() {
 
     // PASS 3: the UI
     // which needs to be drawn on top if the voxel scene, so at the end
-    // ViewNode::render();
+    ViewNode::render();
 }
 
 void VoxelView::updateCamera() {
@@ -213,8 +218,9 @@ VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader)
     *single_chunk_grid->get_voxel(Int3(1.0,0.0,0.0)) = 3;
     *single_chunk_grid->get_voxel(Int3(2.0,0.0,0.0)) = 3;
     *single_chunk_grid->get_voxel(Int3(3.0,0.0,0.0)) = 3;
+    *single_chunk_grid->get_voxel(Int3(3.0,1.0,0.0)) = 3;
     single_chunk_grid->transform.translation = Vector3(-2.0f, 6.0f, -2.0f);
-    single_chunk_grid->transform.scale = Vector3(2.0f, 2.0f, 2.0f);
+    single_chunk_grid->transform.scale = Vector3(1.0f, 1.0f, 1.0f);
     single_chunk_grid->was_updated = true;
     voxel_grids.emplace_back(single_chunk_grid);
 }
@@ -222,22 +228,24 @@ VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader)
 void VoxelView::drawVoxelScene() {
     for (VoxelGrid* grid : voxel_grids) {
         for (ModelInfo* model_info : grid->get_models()) {
-            drawVoxelModel(*model_info);
+            drawVoxelModel(grid, *model_info);
         }
     }
 }
 
-void VoxelView::drawVoxelModel(const ModelInfo& model_info) {
+void VoxelView::drawVoxelModel(const VoxelGrid* grid, const ModelInfo& model_info) {
     // Offset
-    auto offset = model_info.transform.translation;
-
+    auto offset = apply_transform_trans(model_info.transform.translation, grid->transform);
     // Rotation
-    auto axis = Vector3{};
-    auto angle = 0.0f;
-    QuaternionToAxisAngle(model_info.transform.rotation, &axis, &angle);
-
+    Quaternion q = model_info.transform.rotation;
     // Scale
     auto scale = model_info.transform.scale;
+
+    // Grid transform
+    apply_transform(&offset, &q, &scale, grid->transform);
+    auto axis = Vector3{};
+    auto angle = 0.0f;
+    QuaternionToAxisAngle(q, &axis, &angle);
 
     // Drawing the model
     DrawModelEx(model_info.model, offset,

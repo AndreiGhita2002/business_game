@@ -22,9 +22,6 @@ namespace global {
     inline float ambient[4] = {0.06f, 0.06f, 0.06f, 1.0f};
 
     inline std::unique_ptr<ViewNode> root_view;
-    inline VoxelView* voxel_view;
-
-    inline VoxelEditor voxel_editor; //todo convert to view node
 
     // Main Functions, only called inside main
     static void init();
@@ -35,8 +32,28 @@ namespace global {
     raylib::Shader loadAndPatchShader(const std::string& shader_path, int light_count);
 }
 
-Vector3 apply_transform(Vector3 v, const Transform &t);
+void apply_transform(Vector3* position, Quaternion* rotation, Vector3* scale, const Transform& t);
+
+Vector3 apply_transform_trans(Vector3 v, const Transform &t);
+
+Quaternion apply_transform_rot(Quaternion rot, const Transform &t);
+
+Vector3 apply_transform_scale(Vector3 scale, const Transform &t);
+
+/**
+ * Does a ray cast and selects the first grid on the line.
+ *
+ * @param ray: the ray, for mouse ray get it from `GetScreenToWorldRay`
+ * @param voxel_grids: a collection of grids that the function should look through.
+ * @param grid_type: only select grids of this type. If null, then return any grid.
+ * @return The first grid that was found on the ray.
+ */
+VoxelGrid* find_grid_on_ray(Ray ray, const std::vector<VoxelGrid*>* voxel_grids, const char* grid_type);
 
 Transform transform_transform(const Transform& base, const Transform& applied);
+
+Matrix transform_to_matrix(Transform t);
+
+void print_matrix(const Matrix& mat);
 
 #endif //BUSINESS_GAME_MAIN_HPP

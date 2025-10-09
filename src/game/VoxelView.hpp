@@ -12,6 +12,7 @@
 #include "voxel/VoxelGrid.hpp"
 #include "voxel/VoxelMap.hpp"
 
+#define VOXEL_VIEW_STR "VoxelView"
 
 class VoxelView : public ViewNode {
 public:
@@ -26,6 +27,8 @@ public:
     size_t sun_light_id;
     size_t camera_light_id;
     bool move_camera_light = true;
+
+    std::string& get_view_type() override;
 
     void update(float delta_time) override;
     void render() override;
@@ -44,7 +47,7 @@ private:
     // Drawing Functions
     // Should always be within a BeginMode3D()/EndMode3D() block.
     void drawVoxelScene();
-    void drawVoxelModel(const ModelInfo& model_info);
+    void drawVoxelModel(const VoxelGrid* grid, const ModelInfo& model_info);
 };
 
 
