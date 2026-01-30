@@ -94,38 +94,37 @@ void apply_transform(Vector3* position, Quaternion* rotation, Vector3* scale, co
     *scale = apply_transform_scale(*scale, t);
 }
 
+/* Finds the closest VoxelGrid intersected by a ray.
+ *  Parameters:
+ *   ray         - The ray to test against (in world space)
+ *   voxel_grids - Collection of grids to test
+ *   grid_type   - Filter by grid type name (e.g. "SingleChunkGrid"), or nullptr to test all grids
+ * Returns the closest intersected grid, or nullptr if no intersection found.
+ */
 VoxelGrid* find_grid_on_ray(Ray ray, const std::vector<VoxelGrid*>* voxel_grids, const char* grid_type) {
-    TraceLog(LOG_DEBUG, "Ray cast: distance=%f,%f,%f to direction=%f,%f,%f",
+    TraceLog(LOG_DEBUG, "Ray cast: position=%f,%f,%f direction=%f,%f,%f",
             ray.position.x, ray.position.y, ray.position.z,
             ray.direction.x, ray.direction.y, ray.direction.z
         );
-
-    //TODO YOU WERE HERE ------------------------
-    // this still does not work!! STOP LISTENING TO CHATGPT
 
     VoxelGrid* found_grid = nullptr;
     RayCollision best_collision{};
     best_collision.distance = FLT_MAX;
 
     for (VoxelGrid* grid : *voxel_grids) {
-        // Only select SingleChunkGrids
-        if (grid->get_grid_type().compare("SingleChunkGrid") != 0)
+        // Filter by grid type if specified
+        if (grid_type != nullptr && grid->get_grid_type().compare(grid_type) != 0)
             continue;
 
-        //todo: transform is not copied inside for some reason!!
         Matrix grid_mat = transform_to_matrix(grid->transform);
 
         for (auto model : grid->get_models()) {
-            Matrix model_mat = MatrixMultiply(grid_mat, transform_to_matrix(grid->transform));
+            // Combine grid transform with model's own transform
+            Matrix world_mat = MatrixMultiply(model->model.transform, grid_mat);
 
             for (int i = 0; i < model->model.meshCount; ++i) {
+                RayCollision c = GetRayCollisionMesh(ray, model->model.meshes[i], world_mat);
 
-                Matrix mesh_mat = MatrixMultiply(model_mat, model->model.transform);
-                // Matrix world_mat = MatrixInvert(mesh_mat);
-
-                RayCollision c = GetRayCollisionMesh(ray, model->model.meshes[i], mesh_mat);
-
-                print_matrix(mesh_mat);
                 if (c.hit && c.distance < best_collision.distance) {
                     best_collision = c;
                     found_grid = grid;
@@ -153,15 +152,11 @@ Transform transform_transform(const Transform &base, const Transform &applied) {
 }
 
 Matrix transform_to_matrix(Transform t) {
-    Matrix mat = {
-        t.scale.x, 0 ,0, 0,
-        0, t.scale.y, 0, 0,
-        0, 0, t.scale.z, 0,
-        t.translation.x, t.translation.y, t.translation.z, 0
-    };
-    // Matrix rot = QuaternionToMatrix(t.rotation);
-    // return MatrixMultiply(mat, rot);
-    return mat;
+    Matrix scale = MatrixScale(t.scale.x, t.scale.y, t.scale.z);
+    Matrix rotation = QuaternionToMatrix(t.rotation);
+    Matrix translation = MatrixTranslate(t.translation.x, t.translation.y, t.translation.z);
+    // Order: scale, then rotate, then translate
+    return MatrixMultiply(MatrixMultiply(scale, rotation), translation);
 }
 
 std::string global::loadFile(const std::string& path) {
