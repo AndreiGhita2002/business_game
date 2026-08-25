@@ -9,6 +9,7 @@
 #include <vector>
 #include <cstring> // memcpy
 #include <raymath.h>
+#include <rlgl.h>
 #include "VoxelMap.hpp"
 #include "game/main.hpp"
 
@@ -201,4 +202,16 @@ Model build_chunk_model(const std::vector<MaterialMesh> &mats, const std::map<Vo
     for (int i = 0; i < n; ++i) model.meshMaterial[i] = i;
 
     return model;
+}
+
+void unload_chunk_model(Model& model) {
+    // An empty chunk never allocated anything
+    if (model.meshCount == 0) return;
+
+    // Detach the shared shader, so UnloadMaterial() leaves it alone
+    for (int i = 0; i < model.materialCount; ++i)
+        model.materials[i].shader.id = rlGetShaderIdDefault();
+
+    UnloadModel(model);
+    model = Model{};
 }

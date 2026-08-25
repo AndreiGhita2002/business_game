@@ -77,6 +77,20 @@ public:
 
     virtual void set_transform(Transform new_transform) = 0;
 
+    /**
+     * Writes a voxel and marks whatever has to be meshed again.
+     * Returns false when the position falls outside the grid.
+     */
+    virtual bool set_voxel(Int3 grid_pos, VoxelID id) = 0;
+
+    /**
+     * Turns a point in the local space of one of this grid's models into the
+     * coordinate of the voxel that contains it. Model space is the space the
+     * mesher builds in, so X is grid x, Y is grid z (up) and Z is grid y.
+     * Returns false when the model does not belong to this grid.
+     */
+    virtual bool model_to_grid(const ModelInfo* model, Vector3 local_pos, Int3* out) = 0;
+
     explicit VoxelGrid(VoxelView* view) : transform(identity()), view(view) {}
     virtual ~VoxelGrid() = default;
 protected:

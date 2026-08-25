@@ -233,26 +233,18 @@ void VoxelView::drawVoxelScene() {
 }
 
 void VoxelView::drawVoxelModel(const VoxelGrid* grid, const ModelInfo& model_info) {
-    // Offset
-    auto offset = apply_transform_trans(model_info.transform.translation, grid->transform);
-    // Rotation
-    Quaternion q = model_info.transform.rotation;
-    // Scale
-    auto scale = model_info.transform.scale;
-
-    // Grid transform
-    apply_transform(&offset, &q, &scale, grid->transform);
-    auto axis = Vector3{};
-    auto angle = 0.0f;
-    QuaternionToAxisAngle(q, &axis, &angle);
+    // The transform is built by voxel_model_matrix(), which the editor's ray
+    // casts also use, so a click always lands on what is actually drawn.
+    // The Model is copied by value, as DrawModel would do anyway, and only the
+    // matrix on the copy is replaced. The meshes are shared, not duplicated.
+    Model model = model_info.model;
+    model.transform = voxel_model_matrix(grid, model_info);
 
     // Drawing the model
-    DrawModelEx(model_info.model, offset,
-        axis, angle, scale, WHITE);
+    DrawModel(model, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
 
     // Drawing wires
-    // DrawModelWiresEx(model_info->model, offset,
-    //     axis, angle, scale, DARKGRAY);
+    // DrawModelWires(model, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, DARKGRAY);
 }
 
 bool VoxelView::isInRenderDistance(const Vector3 v) const {

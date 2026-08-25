@@ -46,7 +46,6 @@ void global::init() {
     // Voxels
     root_view->add_child(std::make_unique<VoxelView>(root_view.get(), &voxel_shader));
     auto voxel_view = static_cast<VoxelView *>(root_view->child.get());
-    root_view->child->add_child(std::make_unique<VoxelEditor>(voxel_view));
 
     // UI
     // Added after the VoxelView, so it ends up as its sibling and is rendered
@@ -71,7 +70,10 @@ void global::init() {
         },
         Rectangle{16.0f, 16.0f, 0.0f, 0.0f}, Anchor::BOTTOM_LEFT));
 
-    // voxel_editor = VoxelEditor();
+    // The voxel editor is a UI panel now, so it lives under the UIView. It is
+    // added last, which puts it on top of the elements before it.
+    ui_view->add_child(std::make_unique<VoxelEditor>(ui_view, voxel_view));
+
     TraceLog(LOG_DEBUG, "main init finished!");
 }
 
@@ -132,6 +134,60 @@ void apply_transform(Vector3* position, Quaternion* rotation, Vector3* scale, co
     *scale = apply_transform_scale(*scale, t);
 }
 
+Matrix voxel_model_matrix(const VoxelGrid* grid, const ModelInfo& model_info) {
+    // Offset
+    auto offset = apply_transform_trans(model_info.transform.translation, grid->transform);
+    // Rotation
+    Quaternion q = model_info.transform.rotation;
+    // Scale
+    auto scale = model_info.transform.scale;
+
+    // Grid transform
+    apply_transform(&offset, &q, &scale, grid->transform);
+    auto axis = Vector3{};
+    auto angle = 0.0f;
+    QuaternionToAxisAngle(q, &axis, &angle);
+
+    // Same order as DrawModelEx: scale, rotate, translate, then the model's own
+    // transform on top of it
+    Matrix mat = MatrixMultiply(
+        MatrixMultiply(MatrixScale(scale.x, scale.y, scale.z), MatrixRotate(axis, angle)),
+        MatrixTranslate(offset.x, offset.y, offset.z));
+    return MatrixMultiply(model_info.model.transform, mat);
+}
+
+bool find_voxel_on_ray(const Ray ray, const std::vector<VoxelGrid*>* voxel_grids,
+                       const char* grid_type, VoxelRayHit* out) {
+    VoxelRayHit best{};
+    best.collision.distance = FLT_MAX;
+    bool found = false;
+
+    for (VoxelGrid* grid : *voxel_grids) {
+        // Filter by grid type if specified
+        if (grid_type != nullptr && grid->get_grid_type().compare(grid_type) != 0)
+            continue;
+
+        for (ModelInfo* model_info : grid->get_models()) {
+            // SingleChunkGrid reports a null model until it has been meshed
+            if (model_info == nullptr || !model_info->do_render) continue;
+
+            const Matrix world_mat = voxel_model_matrix(grid, *model_info);
+
+            for (int i = 0; i < model_info->model.meshCount; ++i) {
+                RayCollision c = GetRayCollisionMesh(ray, model_info->model.meshes[i], world_mat);
+
+                if (c.hit && c.distance < best.collision.distance) {
+                    best = VoxelRayHit{grid, model_info, c, world_mat};
+                    found = true;
+                }
+            }
+        }
+    }
+
+    if (found && out != nullptr) *out = best;
+    return found;
+}
+
 /* Finds the closest VoxelGrid intersected by a ray.
  *  Parameters:
  *   ray         - The ray to test against (in world space)
@@ -140,37 +196,9 @@ void apply_transform(Vector3* position, Quaternion* rotation, Vector3* scale, co
  * Returns the closest intersected grid, or nullptr if no intersection found.
  */
 VoxelGrid* find_grid_on_ray(Ray ray, const std::vector<VoxelGrid*>* voxel_grids, const char* grid_type) {
-    TraceLog(LOG_DEBUG, "Ray cast: position=%f,%f,%f direction=%f,%f,%f",
-            ray.position.x, ray.position.y, ray.position.z,
-            ray.direction.x, ray.direction.y, ray.direction.z
-        );
-
-    VoxelGrid* found_grid = nullptr;
-    RayCollision best_collision{};
-    best_collision.distance = FLT_MAX;
-
-    for (VoxelGrid* grid : *voxel_grids) {
-        // Filter by grid type if specified
-        if (grid_type != nullptr && grid->get_grid_type().compare(grid_type) != 0)
-            continue;
-
-        Matrix grid_mat = transform_to_matrix(grid->transform);
-
-        for (auto model : grid->get_models()) {
-            // Combine grid transform with model's own transform
-            Matrix world_mat = MatrixMultiply(model->model.transform, grid_mat);
-
-            for (int i = 0; i < model->model.meshCount; ++i) {
-                RayCollision c = GetRayCollisionMesh(ray, model->model.meshes[i], world_mat);
-
-                if (c.hit && c.distance < best_collision.distance) {
-                    best_collision = c;
-                    found_grid = grid;
-                }
-            }
-        }
-    }
-    return found_grid;
+    VoxelRayHit hit{};
+    if (!find_voxel_on_ray(ray, voxel_grids, grid_type, &hit)) return nullptr;
+    return hit.grid;
 }
 
 Transform transform_transform(const Transform &base, const Transform &applied) {

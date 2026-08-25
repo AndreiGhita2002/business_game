@@ -26,6 +26,8 @@ public:
     void update_models() override;
     std::vector<ModelInfo*> get_models() override;
     void set_transform(Transform new_transform) override;
+    bool set_voxel(Int3 grid_pos, VoxelID id) override;
+    bool model_to_grid(const ModelInfo* model, Vector3 local_pos, Int3* out) override;
 
     Int2 get_chunk_count() const;
     VoxelChunk* get_chunk(Int2 pos);

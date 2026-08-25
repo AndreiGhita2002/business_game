@@ -26,6 +26,15 @@ VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y
     colorMap->insert(std::pair<VoxelID, Color>(1, BEIGE));
     colorMap->insert(std::pair<VoxelID, Color>(2, DARKGREEN));
     colorMap->insert(std::pair<VoxelID, Color>(3, YELLOW));
+    // Not used by the terrain, these are here to fill out the editor palette
+    colorMap->insert(std::pair<VoxelID, Color>(4, BLUE));
+    colorMap->insert(std::pair<VoxelID, Color>(5, ORANGE));
+    colorMap->insert(std::pair<VoxelID, Color>(6, PURPLE));
+    colorMap->insert(std::pair<VoxelID, Color>(7, BROWN));
+    colorMap->insert(std::pair<VoxelID, Color>(8, DARKGRAY));
+    colorMap->insert(std::pair<VoxelID, Color>(9, SKYBLUE));
+    colorMap->insert(std::pair<VoxelID, Color>(10, MAROON));
+    colorMap->insert(std::pair<VoxelID, Color>(11, RAYWHITE));
 
     this->chunks = std::map<Int2, VoxelChunk>();
     for (int ix = 0; ix < chunk_count.x; ++ix) {
@@ -60,7 +69,7 @@ VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y
 
 VoxelMap::~VoxelMap() {
     for (auto it = chunk_models.begin(); it != chunk_models.end(); ++it) {
-        UnloadModel(it->second.model);
+        unload_chunk_model(it->second.model);
     }
     chunk_models.clear();
 }
@@ -77,11 +86,15 @@ void VoxelMap::update_models() {
         auto chunk_model = chunk_models.find(chunk_pos);
 
         // calculating the position of the chunk in render space
+        // Chunk (cx, cy) holds the global columns 16cx to 16cx+15, and a voxel
+        // spans one unit, so chunks sit CHUNK_SIZE apart and meet exactly. A
+        // smaller spacing would overlap them and draw two different columns of
+        // terrain in the same place.
         auto model_transform = transform;
         model_transform.translation = Vector3Add(model_transform.translation, Vector3{
-            static_cast<float>(it->first.x) * (CHUNK_SIZE - 1),
+            static_cast<float>(it->first.x) * CHUNK_SIZE,
             0.0,
-            static_cast<float>(it->first.y) * (CHUNK_SIZE - 1)
+            static_cast<float>(it->first.y) * CHUNK_SIZE
         });
 
         // render distance check
@@ -92,6 +105,12 @@ void VoxelMap::update_models() {
         if (chunk_was_updated[chunk_pos]) {
             auto meshes = build_chunk_mesh(*chunk, Vector3{0.0,0.0,0.0}, 1.0f);
             auto new_model = build_chunk_model(meshes, *voxel_colours);
+
+            // A chunk that is meshed again already holds a model, which would
+            // leak its GPU buffers if it were simply overwritten. This happens
+            // on every voxel the editor places.
+            if (chunk_model != chunk_models.end())
+                unload_chunk_model(chunk_model->second.model);
 
             chunk_models[chunk_pos] = ModelInfo{true, new_model, model_transform};
             chunk_was_updated[chunk_pos] = false;
@@ -114,6 +133,42 @@ void VoxelMap::set_transform(Transform new_transform) {
     for (auto it = chunk_models.begin(); it != chunk_models.end(); ++it) {
         it->second.transform = transform_transform(it->second.transform, new_transform);
     }
+}
+
+bool VoxelMap::set_voxel(const Int3 grid_pos, const VoxelID id) {
+    // get_voxel() wraps out of range coordinates instead of rejecting them,
+    // so the bounds are checked before it is called
+    if (grid_pos.x < 0 || grid_pos.x >= size.x ||
+        grid_pos.y < 0 || grid_pos.y >= size.y ||
+        grid_pos.z < 0 || grid_pos.z >= CHUNK_SIZE)
+        return false;
+
+    VoxelID* voxel = get_voxel(grid_pos);
+    if (voxel == nullptr) return false;
+
+    *voxel = id;
+    chunk_was_updated[Int2{floordiv(grid_pos.x, CHUNK_SIZE), floordiv(grid_pos.y, CHUNK_SIZE)}] = true;
+    return true;
+}
+
+bool VoxelMap::model_to_grid(const ModelInfo* model, const Vector3 local_pos, Int3* out) {
+    if (model == nullptr) return false;
+
+    // Each chunk is meshed at its own origin, so the local position only gives
+    // the voxel inside the chunk. The chunk itself is found by identity, as
+    // ModelInfo does not carry which chunk it was built from.
+    for (const auto& [chunk_pos, info] : chunk_models) {
+        if (&info != model) continue;
+
+        // Model space is (x, z, y) in grid terms
+        *out = Int3{
+            chunk_pos.x * CHUNK_SIZE + static_cast<int>(floorf(local_pos.x)),
+            chunk_pos.y * CHUNK_SIZE + static_cast<int>(floorf(local_pos.z)),
+            static_cast<int>(floorf(local_pos.y)),
+        };
+        return true;
+    }
+    return false;
 }
 
 VoxelChunk* VoxelMap::get_chunk(Int2 pos) {

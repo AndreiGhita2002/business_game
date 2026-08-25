@@ -61,6 +61,13 @@ Hand-rolled retained-mode UI in `src/ui`:
 - **Elements** - `UILabel` (text, optional background plate), `UIButton` (text +
   `std::function` action, hover/press states from UIView), `UIImage` (texture,
   sized from one axis plus the aspect ratio; owns the texture when it loaded it).
+- **VoxelEditor** (`src/ui/VoxelEditor.cpp/hpp`) - A UINode panel in the bottom
+  right holding a table of `VoxelPaletteCell`s, one per colour in the grid's
+  `voxel_colours` map plus a deselect cell. Pick a colour, then left click the
+  world to place a voxel next to the face that was hit, or right click to clear
+  the voxel that was hit, on the first grid the ray meets. The armed cell is
+  outlined and the target voxel is previewed as a wireframe cube. It skips world
+  clicks while `UIView::mouse_consumed` is set.
 
 An element left with a 0 width or height in `bounds` sizes itself through
 `measure()`, so most are built with only a margin, e.g. `Rectangle{16, 16, 0, 0}`
@@ -73,6 +80,17 @@ UIView already owns. If an expensive widget comes up later - text box with
 editing, slider, colour picker, scroll panel - the agreed fallback is to wrap that
 single raygui call inside one UINode subclass's `draw()`, keeping UIView in charge
 of hit-testing and `mouse_consumed`. Do not convert the framework wholesale.
+
+### Picking
+
+`voxel_model_matrix()` (`main.cpp`) builds the matrix a voxel model is drawn
+with. Both `VoxelView::drawVoxelModel` and `find_voxel_on_ray` go through it, so
+what is on screen and what a click hits cannot drift apart. `find_voxel_on_ray`
+returns the grid, the ModelInfo, the world space collision and that matrix;
+invert the matrix to get model space, where `VoxelGrid::model_to_grid` turns a
+point into a grid coordinate and `VoxelGrid::set_voxel` writes it and marks the
+right chunk for remeshing. Model space is the mesher's space: X is grid x, Y is
+grid z (up), Z is grid y.
 
 ### Entry Point
 
@@ -97,6 +115,8 @@ of hit-testing and `mouse_consumed`. Do not convert the framework wholesale.
 ## Known Issues (from TODOs in code)
 
 - Double-free bug with UnloadShader (commented out in main.cpp:52)
-- Ray-grid collision incomplete (main.cpp:103)
+- The mesher treats out-of-chunk neighbours as air, so every chunk emits a wall
+  of hidden faces along its borders. Stitching neighbouring chunks would drop
+  them (noted in `VoxelMesher.cpp`).
 - Greedy meshing optimization not yet implemented
 - VoxelGrid model vector recreated on every call (VoxelGrid.hpp:71)
