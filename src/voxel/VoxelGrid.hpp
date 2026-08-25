@@ -8,7 +8,7 @@
 #include <map>
 #include <string>
 
-// #include "game/VoxelView.hpp"
+// #include "voxel/VoxelView.hpp"
 class VoxelView;
 
 // REMINDER: Z goes UP/DOWN

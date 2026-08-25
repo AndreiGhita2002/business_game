@@ -5,7 +5,7 @@
 #ifndef BUSINESS_GAME_VOXELEDITOR_HPP
 #define BUSINESS_GAME_VOXELEDITOR_HPP
 
-#include "ViewNode.hpp"
+#include "game/ViewNode.hpp"
 #include "voxel/VoxelGrid.hpp"
 
 #define VOXEL_EDITOR_STR "VoxelEditor"

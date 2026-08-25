@@ -25,9 +25,11 @@ The project uses CMake with FetchContent for dependencies (raylib, raylib-cpp, r
 ### Scene Graph (ViewNode Tree)
 
 The UI/scene uses a `ViewNode` tree hierarchy with recursive update/render traversal:
-- `root_view` → `VoxelView` → `VoxelEditor`
+- `root_view` → `VoxelView` (→ `VoxelEditor`) and `UIView` (→ UI elements),
+  where `UIView` is a sibling of `VoxelView` and so is updated and drawn after it
 - ViewNodes manage parent/child/sibling relationships
 - Located in `src/game/ViewNode.hpp`
+- `VoxelEditor` lives in `src/ui/`, `VoxelView` in `src/voxel/`
 
 ### Voxel System
 
@@ -39,7 +41,7 @@ The UI/scene uses a `ViewNode` tree hierarchy with recursive update/render trave
 
 ### Rendering Pipeline (VoxelView)
 
-Three-pass system in `src/game/VoxelView.cpp/hpp`:
+Three-pass system in `src/voxel/VoxelView.cpp/hpp`:
 1. **Shadow Pass** - Render to shadow map for each light
 2. **Main Pass** - Render with lighting shader using shadow maps
 3. **UI Pass** - Overlay UI elements

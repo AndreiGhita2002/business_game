@@ -53,11 +53,11 @@ add_executable(${PROJECT_NAME}
         src/voxel/VoxelGrid.hpp
         src/voxel/SingleChunkGrid.cpp
         src/voxel/SingleChunkGrid.hpp
-        src/game/VoxelEditor.cpp
-        src/game/VoxelEditor.hpp
+        src/ui/VoxelEditor.cpp
+        src/ui/VoxelEditor.hpp
         src/game/ViewNode.hpp
-        src/game/VoxelView.cpp
-        src/game/VoxelView.hpp
+        src/voxel/VoxelView.cpp
+        src/voxel/VoxelView.hpp
         src/game/Light.cpp
         src/game/Light.hpp
         src/ui/UIStyle.hpp

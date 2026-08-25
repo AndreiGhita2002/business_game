@@ -7,8 +7,8 @@
 #include <Camera3D.hpp>
 #include <Shader.hpp>
 
-#include "Light.hpp"
-#include "ViewNode.hpp"
+#include "game/Light.hpp"
+#include "game/ViewNode.hpp"
 #include "voxel/VoxelGrid.hpp"
 #include "voxel/VoxelMap.hpp"
 

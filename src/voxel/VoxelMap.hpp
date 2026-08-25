@@ -6,7 +6,7 @@
 #define BUSINESS_GAME_GAMEMAP_HPP
 #include <map>
 
-// #include "game/VoxelView.hpp"
+// #include "voxel/VoxelView.hpp"
 // class VoxelView;
 #include "voxel/VoxelGrid.hpp"
 

@@ -6,7 +6,7 @@
 
 #include <cfloat>
 
-#include "main.hpp"
+#include "game/main.hpp"
 #include "voxel/SingleChunkGrid.hpp"
 
 std::string& VoxelEditor::get_view_type() {

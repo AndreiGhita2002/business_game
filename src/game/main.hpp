@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "ViewNode.hpp"
-#include "VoxelEditor.hpp"
-#include "VoxelView.hpp"
+#include "ui/VoxelEditor.hpp"
+#include "voxel/VoxelView.hpp"
 #include "voxel/VoxelMap.hpp"
 
 namespace global {
