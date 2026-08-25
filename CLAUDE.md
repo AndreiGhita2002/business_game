@@ -46,9 +46,28 @@ Three-pass system in `src/game/VoxelView.cpp/hpp`:
 
 Lighting system supports directional + point lights with 1024x1024 shadow maps. Shaders in `resources/shaders/` are patched at runtime for dynamic light count.
 
+### UI System
+
+Hand-rolled retained-mode UI in `src/ui`:
+- **UIView** (`UIView.cpp/hpp`) - Root of a UI subtree. Resolves layout, dispatches
+  mouse events to the topmost element, owns the shared `UIStyle` and the scissor
+  clip stack. Exposes `mouse_consumed` so 3D views can skip picking when the
+  cursor is over UI.
+- **UINode** (`UINode.cpp/hpp`) - Abstract base for UI elements. Parent-relative
+  `bounds` + `Anchor` resolved to an absolute `screen_rect` each frame.
+  Subclasses implement `draw()` / `measure()` / `on_*` callbacks, not `render()`.
+
+Note on raygui: it is fetched by CMake and on the include path, but deliberately
+unused. We chose to hand-roll the basic elements (label, button, image) because
+raygui is immediate-mode and would duplicate the input state and hit-testing that
+UIView already owns. If an expensive widget comes up later - text box with
+editing, slider, colour picker, scroll panel - the agreed fallback is to wrap that
+single raygui call inside one UINode subclass's `draw()`, keeping UIView in charge
+of hit-testing and `mouse_consumed`. Do not convert the framework wholesale.
+
 ### Entry Point
 
-`src/game/main.cpp` - Initializes 1600x900 window, sets up shader pipeline, runs 60 FPS main loop. Supports Emscripten/WebAssembly compilation.
+`src/game/main.cpp` - Initializes 1600x900 window, sets up shader pipeline, runs 60 FPS main loop. Supports Emscripten/WebAssembly compilation. `mainLoop()` owns the frame's single `BeginDrawing()`/`EndDrawing()` block, so views draw in tree order (3D first, UI on top) - individual ViewNodes must never open their own drawing block.
 
 ## Working Guidelines
 

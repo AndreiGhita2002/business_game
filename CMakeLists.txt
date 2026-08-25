@@ -60,6 +60,11 @@ add_executable(${PROJECT_NAME}
         src/game/VoxelView.hpp
         src/game/Light.cpp
         src/game/Light.hpp
+        src/ui/UIStyle.hpp
+        src/ui/UINode.cpp
+        src/ui/UINode.hpp
+        src/ui/UIView.cpp
+        src/ui/UIView.hpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

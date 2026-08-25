@@ -26,6 +26,7 @@ void VoxelView::render() {
     Matrix light_proj = {};
 
     // PASS 1: Render all objects into the shadow map render texture
+    // (render textures may be used inside the frame's drawing block)
     for (Light& light : lights) {
         BeginTextureMode(*light.shadow_map); {
             ClearBackground(WHITE);
@@ -43,34 +44,32 @@ void VoxelView::render() {
         light.light_view_proj = MatrixMultiply(light_view, light_proj);
     }
     // PASS 2: Drawing
-    BeginDrawing(); {
-        ClearBackground(RAYWHITE);
-        rlEnableShader(voxel_shader->id);
-        for (Light& light : lights) {
-            rlActiveTextureSlot(light.texture_loc);
-            rlEnableTexture(light.shadow_map->depth.id);
-            rlSetUniform(light.shadow_map_loc, &light.texture_loc, SHADER_UNIFORM_INT, 1);
-            SetShaderValueMatrix(*voxel_shader, light.vp_loc, light.light_view_proj);
-        }
-        BeginMode3D(camera); {
-            drawVoxelScene();
-
-            // Shader Mode is only necessary for immediate draw calls
-            BeginShaderMode(*voxel_shader); {
-                // Test Cube
-                DrawCube(Vector3{0.0, 0.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);
-            }
-            EndShaderMode();
-
-            // Draw spheres to show where the lights are
-            for (Light& light : lights) {
-                if (light.enabled) DrawSphereEx(light.position, 0.2f, 8, 8, light.color);
-                else DrawSphereWires(light.position, 0.2f, 8, 8, ColorAlpha(light.color, 0.3f));
-            }
-        }
-        EndMode3D();
+    // Note: the frame's BeginDrawing()/EndDrawing() block is opened by
+    // global::mainLoop(), so that the UI views can draw on top of this one.
+    rlEnableShader(voxel_shader->id);
+    for (Light& light : lights) {
+        rlActiveTextureSlot(light.texture_loc);
+        rlEnableTexture(light.shadow_map->depth.id);
+        rlSetUniform(light.shadow_map_loc, &light.texture_loc, SHADER_UNIFORM_INT, 1);
+        SetShaderValueMatrix(*voxel_shader, light.vp_loc, light.light_view_proj);
     }
-    EndDrawing();
+    BeginMode3D(camera); {
+        drawVoxelScene();
+
+        // Shader Mode is only necessary for immediate draw calls
+        BeginShaderMode(*voxel_shader); {
+            // Test Cube
+            DrawCube(Vector3{0.0, 0.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);
+        }
+        EndShaderMode();
+
+        // Draw spheres to show where the lights are
+        for (Light& light : lights) {
+            if (light.enabled) DrawSphereEx(light.position, 0.2f, 8, 8, light.color);
+            else DrawSphereWires(light.position, 0.2f, 8, 8, ColorAlpha(light.color, 0.3f));
+        }
+    }
+    EndMode3D();
 
     // PASS 3: the UI
     // which needs to be drawn on top if the voxel scene, so at the end

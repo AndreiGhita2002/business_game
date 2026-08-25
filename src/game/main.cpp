@@ -15,6 +15,7 @@
 #include "raylib-cpp.hpp"
 #include "voxel/VoxelMesher.hpp"
 #include "voxel/SingleChunkGrid.hpp"
+#include "ui/UIView.hpp"
 
 #if defined(PLATFORM_WEB)
     #include <emscripten/emscripten.h>
@@ -44,6 +45,11 @@ void global::init() {
     auto voxel_view = static_cast<VoxelView *>(root_view->child.get());
     root_view->child->add_child(std::make_unique<VoxelEditor>(voxel_view));
 
+    // UI
+    // Added after the VoxelView, so it ends up as its sibling and is rendered
+    // once the voxel scene is already on screen.
+    root_view->add_child(std::make_unique<UIView>(root_view.get()));
+
     // voxel_editor = VoxelEditor();
     TraceLog(LOG_DEBUG, "main init finished!");
 }
@@ -58,7 +64,14 @@ void global::shutdown() {
 
 void global::mainLoop() {
     root_view->update(GetFrameTime());
-    root_view->render();
+
+    // The whole frame is drawn inside a single Begin/EndDrawing block, so that
+    // every ViewNode draws in tree order: the voxel scene first, the UI on top.
+    BeginDrawing(); {
+        ClearBackground(RAYWHITE);
+        root_view->render();
+    }
+    EndDrawing();
 }
 
 Vector3 apply_transform_trans(const Vector3 v, const Transform &t) {
