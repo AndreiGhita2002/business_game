@@ -4,6 +4,8 @@
 
 #include "VoxelView.hpp"
 
+#include <rlgl.h>
+
 #include "game/main.hpp"
 #include "voxel/SingleChunkGrid.hpp"
 
@@ -27,6 +29,21 @@ void VoxelView::render() {
 
     // PASS 1: Render all objects into the shadow map render texture
     // (render textures may be used inside the frame's drawing block)
+    //
+    // Only back faces are written to the shadow map. The recorded depth then
+    // belongs to the far side of a solid, a whole voxel away from the surface
+    // being lit, so a surface can no longer shadow itself. Without this, a
+    // large light box needs a bias so big that shadows come away from their
+    // casters. It relies on the voxel meshes being closed, which they are:
+    // the mesher emits a face wherever the neighbour is air or out of chunk.
+    // The batch is flushed first, as the cull mode is immediate GL state while
+    // the batch is deferred.
+    rlDrawRenderBatchActive();
+    rlSetCullFace(RL_CULL_FACE_FRONT);
+    // A tight depth range around the light. The main camera's 0.01 to 1000
+    // would put nearly all of the depth precision into empty space.
+    rlSetClipPlanes(SHADOW_NEAR, SHADOW_FAR);
+
     for (Light& light : lights) {
         BeginTextureMode(*light.shadow_map); {
             ClearBackground(WHITE);
@@ -43,6 +60,12 @@ void VoxelView::render() {
         // Update lightVP
         light.light_view_proj = MatrixMultiply(light_view, light_proj);
     }
+
+    // Back to the settings the main camera pass expects
+    rlSetClipPlanes(RL_CULL_DISTANCE_NEAR, RL_CULL_DISTANCE_FAR);
+    rlDrawRenderBatchActive();
+    rlSetCullFace(RL_CULL_FACE_BACK);
+
     // PASS 2: Drawing
     // Note: the frame's BeginDrawing()/EndDrawing() block is opened by
     // global::mainLoop(), so that the UI views can draw on top of this one.
@@ -152,6 +175,9 @@ void VoxelView::updateCamera() {
 
 void VoxelView::updateLights() {
     // Light Controls
+    // Each of these also has a button in the bottom left, and the O and P keys
+    // are mirrored by the light box rows in the shader menu. Both routes write
+    // the same state, so they stay in step.
     if (IsKeyReleased(KEY_Y)) move_camera_light = !move_camera_light;
     if (IsKeyReleased(KEY_U)) lights[sun_light_id].enabled = !lights[sun_light_id].enabled;
     if (IsKeyReleased(KEY_I)) lights[camera_light_id].enabled = !lights[camera_light_id].enabled;

@@ -6,6 +6,12 @@
 #define BUSINESS_GAME_LIGHT_HPP
 
 #define SHADOWMAP_RESOLUTION 1024
+
+// Clip planes used while rendering a shadow map. The main camera's 0.01 to 1000
+// range would spend nearly all of its depth precision on empty space, which
+// shows up as banding in the shadows.
+#define SHADOW_NEAR 0.1
+#define SHADOW_FAR 256.0
 #include <RenderTexture.hpp>
 #include <Vector3.hpp>
 
@@ -39,6 +45,7 @@ struct Light {
     int vp_loc{-1};
     int shadow_map_loc{-1};
     int texture_loc{-1};
+    int shadow_texel_loc{-1};
 
     void update(Shader shader);
 

@@ -104,7 +104,7 @@ public:
      * Finds the element under `point` in this subtree.
      * The last element drawn wins, so the topmost one is returned.
      */
-    UINode* hit_test(Vector2 point);
+    virtual UINode* hit_test(Vector2 point);
 
     bool contains(Vector2 point) const;
 

@@ -19,12 +19,18 @@
 #include "ui/UILabel.hpp"
 #include "ui/UIButton.hpp"
 #include "ui/UIImage.hpp"
+#include "ui/ShaderMenu.hpp"
 
 #if defined(PLATFORM_WEB)
     #include <emscripten/emscripten.h>
 #endif
 
 #define GLSL_VERSION 330
+
+// Layout of the debug buttons, in pixels
+constexpr float UI_MARGIN = 16.0f;
+constexpr float UI_BUTTON_HEIGHT = 32.0f;
+constexpr float UI_BUTTON_GAP = 8.0f;
 
 void global::init() {
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
@@ -62,13 +68,53 @@ void global::init() {
     title->background = ui_view->style.background;
     ui_view->add_child(std::move(title));
 
-    // Does the same as the U key, to show a button driving the scene
-    ui_view->add_child(std::make_unique<UIButton>(ui_view, "Toggle Sun",
-        [voxel_view] {
-            Light& sun = voxel_view->lights[voxel_view->sun_light_id];
-            sun.enabled = !sun.enabled;
-        },
-        Rectangle{16.0f, 16.0f, 0.0f, 0.0f}, Anchor::BOTTOM_LEFT));
+    // Debug panel for the lighting, hidden until F3 or until its button is
+    // pressed. It sits under that button, in the top left.
+    auto shader_menu_node = std::make_unique<ShaderMenu>(ui_view, &voxel_shader);
+    auto shader_menu = shader_menu_node.get();
+    shader_menu->bounds = Rectangle{UI_MARGIN, UI_MARGIN + UI_BUTTON_HEIGHT + UI_BUTTON_GAP, 0.0f, 0.0f};
+
+    // The light boxes are not shader uniforms, but they belong on the same
+    // panel. These two replace the O and P keys, which only reached the camera
+    // light. Pointers into the light vector are stable because it is reserved
+    // at its final size and never grown again.
+    shader_menu->add_value_row("sun box",
+        &voxel_view->lights[voxel_view->sun_light_id].light_camera.fovy,
+        8.0f, 8.0f, 512.0f, 0, {});
+    shader_menu->add_value_row("camera box",
+        &voxel_view->lights[voxel_view->camera_light_id].light_camera.fovy,
+        8.0f, 8.0f, 512.0f, 0, {});
+
+    ui_view->add_child(std::move(shader_menu_node));
+
+    ui_view->add_child(std::make_unique<UIButton>(ui_view, "Shader Menu",
+        [shader_menu] { shader_menu->visible = !shader_menu->visible; },
+        Rectangle{UI_MARGIN, UI_MARGIN, 0.0f, UI_BUTTON_HEIGHT}, Anchor::TOP_LEFT));
+
+    // A button for everything that used to be on a key only. The keys still
+    // work: see VoxelView::updateLights. Buttons stack upwards from the bottom
+    // left corner, so the first one added ends up lowest.
+    float button_y = UI_MARGIN;
+    auto add_bottom_left_button = [&](const char* text, std::function<void()> action) {
+        ui_view->add_child(std::make_unique<UIButton>(ui_view, text, std::move(action),
+            Rectangle{UI_MARGIN, button_y, 0.0f, UI_BUTTON_HEIGHT}, Anchor::BOTTOM_LEFT));
+        button_y += UI_BUTTON_HEIGHT + UI_BUTTON_GAP;
+    };
+
+    // U
+    add_bottom_left_button("Toggle Sun", [voxel_view] {
+        Light& sun = voxel_view->lights[voxel_view->sun_light_id];
+        sun.enabled = !sun.enabled;
+    });
+    // I
+    add_bottom_left_button("Toggle Camera Light", [voxel_view] {
+        Light& camera_light = voxel_view->lights[voxel_view->camera_light_id];
+        camera_light.enabled = !camera_light.enabled;
+    });
+    // Y
+    add_bottom_left_button("Light Follows Camera", [voxel_view] {
+        voxel_view->move_camera_light = !voxel_view->move_camera_light;
+    });
 
     // The voxel editor is a UI panel now, so it lives under the UIView. It is
     // added last, which puts it on top of the elements before it.

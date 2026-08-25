@@ -26,6 +26,9 @@ struct Light {
     vec3 position;
     vec3 target;
     vec4 color;   // rgb in 0..1
+    // Size of one shadow map texel, in the depth units compared below. Sent by
+    // Light::update(), so the bias follows the light's projection size.
+    float shadowTexelDepth;
 };
 
 uniform Light lights[MAX_LIGHTS];
@@ -41,10 +44,18 @@ uniform int shadowMapResolution; // Side length (pixels)
 // Output
 out vec4 finalColor;
 
-// Shadow bias constants (replace with your preferred tuning)
-const float BIAS_BASE = 0.0002;  // slope-scale factor
-const float BIAS_MIN  = 0.00002; // minimum bias
-const float BIAS_EPS  = 0.00001; // small constant to reduce acne further
+// Shadow bias, counted in shadow map texels rather than in fixed depth units,
+// so that resizing a light's box does not need these retuned. The base covers
+// the 3x3 PCF neighbourhood, which reaches sqrt(2) texels out, and the slope
+// term covers the depth a surface gains across one texel as it turns away from
+// the light.
+// biasMaxSlope stops grazing surfaces asking for a huge bias.
+//
+// These are uniforms so the debug menu can tune them while the game runs. They
+// have no defaults here: ShaderMenu sends its starting values when it is built.
+uniform float biasTexels;
+uniform float biasSlopeTexels;
+uniform float biasMaxSlope;
 
 float SampleShadowMap(int i, vec2 uv) {
     //patched in global::loadAndPatchShader()
@@ -109,8 +120,10 @@ void main() {
                 uvz.y >= 0.0 && uvz.y <= 1.0 &&
                 uvz.z >= 0.0 && uvz.z <= 1.0) {
 
-                // Slope-scaled depth bias
-                float bias = max(BIAS_BASE * (1.0 - dot(N, L)), BIAS_MIN) + BIAS_EPS;
+                // Slope-scaled depth bias, in texels of this light's shadow map
+                float ndl   = max(NdotL, 0.05);
+                float slope = min(sqrt(1.0 - ndl*ndl)/ndl, biasMaxSlope); // tan of the angle to the light
+                float bias  = lights[i].shadowTexelDepth * (biasTexels + biasSlopeTexels*slope);
 
                 // 3x3 PCF
                 const int numSamples = 9;

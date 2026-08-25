@@ -48,6 +48,23 @@ Three-pass system in `src/voxel/VoxelView.cpp/hpp`:
 
 Lighting system supports directional + point lights with 1024x1024 shadow maps. Shaders in `resources/shaders/` are patched at runtime for dynamic light count.
 
+Shadow pass details worth knowing:
+- A light's `light_camera` is orthographic, and raylib reads `fovy` on an ortho
+  camera as the **height of the box in world units**, not an angle. That value is
+  the size of the region that gets shadows at all - fragments outside the light
+  frustum are drawn fully lit (`lighting.fs`), which looks like shadows simply
+  stopping partway across the scene.
+- The pass renders **back faces only** (`RL_CULL_FACE_FRONT`), so the depth in
+  the map is the far side of a solid and a surface cannot shadow itself. This
+  depends on the voxel meshes being closed.
+- It uses its own tight clip planes (`SHADOW_NEAR`/`SHADOW_FAR` in `Light.hpp`)
+  and restores raylib's defaults afterwards.
+- The shader's bias is counted in shadow map texels; `Light::update` sends
+  `shadowTexelDepth` per light, so changing a light's box needs no retuning.
+- `biasTexels`, `biasSlopeTexels` and `biasMaxSlope` are uniforms with no
+  defaults in the shader. ShaderMenu sends them when it is built, so the shader
+  needs a ShaderMenu (or an equivalent) to light anything correctly.
+
 ### UI System
 
 Hand-rolled retained-mode UI in `src/ui`:
@@ -61,6 +78,18 @@ Hand-rolled retained-mode UI in `src/ui`:
 - **Elements** - `UILabel` (text, optional background plate), `UIButton` (text +
   `std::function` action, hover/press states from UIView), `UIImage` (texture,
   sized from one axis plus the aspect ratio; owns the texture when it loaded it).
+- **UINumberRow** (`src/ui/UINumberRow.cpp/hpp`) - `label [-] value [+]`. Holds a
+  `float*` to a number owned elsewhere, plus its own step, so one row can drive a
+  shader uniform, a light setting, or anything else in place.
+- **ShaderMenu** (`src/ui/ShaderMenu.cpp/hpp`) - Debug panel, top left, hidden
+  until F3 or its own button. One UINumberRow per tunable: the three shadow bias
+  uniforms, the ambient level, and each light's shadow box size. It owns the
+  starting values for the bias uniforms, which `lighting.fs` no longer defines
+  itself. `add_value_row()` hangs non-uniform values off the same panel.
+
+Every light keybind (Y, U, I, O, P) is mirrored by a button in the bottom left
+or a row in the shader menu; both write the same state. The camera movement keys
+(WASD, Q/E, F/C) are held rather than toggled, so they have no buttons.
 - **VoxelEditor** (`src/ui/VoxelEditor.cpp/hpp`) - A UINode panel in the bottom
   right holding a table of `VoxelPaletteCell`s, one per colour in the grid's
   `voxel_colours` map plus a deselect cell. Pick a colour, then left click the
@@ -99,6 +128,10 @@ grid z (up), Z is grid y.
 ## Working Guidelines
 
 - Only edit what is explicitly requested - do not refactor or "improve" surrounding code
+- `ViewNode::isEnabled` currently stops the whole sibling chain, not just that
+  node: a disabled node returns before recursing to its sibling, so everything
+  added after it also stops updating and drawing. Hide a node with its own flag
+  (as ShaderMenu does with `visible`) until that is sorted out.
 - Look for `TODO(claude)` comments in the codebase for tasks to pick up
 - Do not compile or run the program - the user will handle building and testing
 - Add appropriate comments to explain non-obvious logic

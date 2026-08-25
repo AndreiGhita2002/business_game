@@ -6,9 +6,13 @@ include(FetchContent)
 find_package(raylib QUIET)
 if(NOT raylib_FOUND)
     include(FetchContent)
+    # Pinned on purpose. Without a tag this tracks raylib's default branch,
+    # which has moved on to 6.x, and raylib-cpp refuses to build against
+    # anything past 5.x. 5.5 is the newest release raylib-cpp accepts.
     FetchContent_Declare(
             raylib
             GIT_REPOSITORY https://github.com/raysan5/raylib.git
+            GIT_TAG 5.5
             GIT_SHALLOW 1
     )
     FetchContent_MakeAvailable(raylib)
@@ -17,9 +21,11 @@ endif()
 # raylib-cpp
 find_package(raylib_cpp QUIET)
 if(NOT raylib_cpp_FOUND)
-    # Use a real tag/branch/sha instead of "next" (which is not valid here).
+    # Pinned to a commit rather than a branch, so a rebuild cannot pick up an
+    # incompatible raylib-cpp on its own. This one targets raylib 5.x.
     # Users can -D RAYLIB_CPP_VERSION=<tag/sha> to override.
-    set(RAYLIB_CPP_VERSION "master" CACHE STRING "raylib-cpp git tag/branch/sha")
+    set(RAYLIB_CPP_VERSION "21b0d0f57a09a7f741d20b7157f440ae87f02c76"
+            CACHE STRING "raylib-cpp git tag/branch/sha")
     include(FetchContent)
     FetchContent_Declare(
             raylib_cpp
@@ -71,6 +77,10 @@ add_executable(${PROJECT_NAME}
         src/ui/UIButton.hpp
         src/ui/UIImage.cpp
         src/ui/UIImage.hpp
+        src/ui/UINumberRow.cpp
+        src/ui/UINumberRow.hpp
+        src/ui/ShaderMenu.cpp
+        src/ui/ShaderMenu.hpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

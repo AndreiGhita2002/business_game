@@ -33,13 +33,19 @@ size_t Light::create(
     light.texture_loc = light.id + 10; // the 10 is kinda arbitrary
     light.vp_loc = GetShaderLocation(shader, TextFormat("lightVP%i", light.id));
     light.shadow_map_loc = GetShaderLocation(shader, TextFormat("shadowMap%i", light.id));
+    light.shadow_texel_loc = GetShaderLocation(shader, TextFormat("lights[%i].shadowTexelDepth", light.id));
 
     //todo find a better camera configuration for lights
+    // For an orthographic camera raylib reads fovy as the height of the view
+    // box in world units, not as an angle, so this is the width of the area
+    // that receives shadows at all. Anything outside it is drawn fully lit.
+    // Bigger box, more coverage, blockier shadows: 1024 texels spread over 128
+    // units still leaves 8 texels per voxel.
     light.light_camera = {
         light.position,
         light.target,
         { 0.0f, 1.0f, 0.0f },
-        32.0f,
+        128.0f,
         CAMERA_ORTHOGRAPHIC
     };
 
@@ -103,6 +109,13 @@ void Light::update(Shader shader) {
     // Send to shader light color values
     Vector4 s_color = { color.r/255.f, color.g/255.f, color.b/255.f, color.a/255.f };
     SetShaderValue(shader, color_loc, &s_color, SHADER_UNIFORM_VEC4);
+
+    // One shadow map texel, in the depth units the shader compares against. The
+    // shader scales its bias by this, so resizing the light's box (or holding O
+    // and P) keeps the bias right without any constants being retuned.
+    const float texel_world = light_camera.fovy / static_cast<float>(SHADOWMAP_RESOLUTION);
+    const float texel_depth = texel_world / static_cast<float>(SHADOW_FAR - SHADOW_NEAR);
+    SetShaderValue(shader, shadow_texel_loc, &texel_depth, SHADER_UNIFORM_FLOAT);
 }
 
 Light::~Light() {
@@ -138,6 +151,7 @@ Light::Light(Light&& other) noexcept
     , vp_loc(other.vp_loc)
     , shadow_map_loc(other.shadow_map_loc)
     , texture_loc(other.texture_loc)
+    , shadow_texel_loc(other.shadow_texel_loc)
 {
     other.shadow_map = nullptr;
 }
@@ -175,6 +189,7 @@ Light& Light::operator=(Light&& other) noexcept {
         vp_loc = other.vp_loc;
         shadow_map_loc = other.shadow_map_loc;
         texture_loc = other.texture_loc;
+        shadow_texel_loc = other.shadow_texel_loc;
     }
     return *this;
 }
