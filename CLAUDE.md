@@ -56,6 +56,13 @@ Hand-rolled retained-mode UI in `src/ui`:
 - **UINode** (`UINode.cpp/hpp`) - Abstract base for UI elements. Parent-relative
   `bounds` + `Anchor` resolved to an absolute `screen_rect` each frame.
   Subclasses implement `draw()` / `measure()` / `on_*` callbacks, not `render()`.
+- **Elements** - `UILabel` (text, optional background plate), `UIButton` (text +
+  `std::function` action, hover/press states from UIView), `UIImage` (texture,
+  sized from one axis plus the aspect ratio; owns the texture when it loaded it).
+
+An element left with a 0 width or height in `bounds` sizes itself through
+`measure()`, so most are built with only a margin, e.g. `Rectangle{16, 16, 0, 0}`
+with `Anchor::BOTTOM_LEFT`.
 
 Note on raygui: it is fetched by CMake and on the include path, but deliberately
 unused. We chose to hand-roll the basic elements (label, button, image) because

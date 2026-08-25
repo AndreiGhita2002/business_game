@@ -16,6 +16,9 @@
 #include "voxel/VoxelMesher.hpp"
 #include "voxel/SingleChunkGrid.hpp"
 #include "ui/UIView.hpp"
+#include "ui/UILabel.hpp"
+#include "ui/UIButton.hpp"
+#include "ui/UIImage.hpp"
 
 #if defined(PLATFORM_WEB)
     #include <emscripten/emscripten.h>
@@ -48,7 +51,25 @@ void global::init() {
     // UI
     // Added after the VoxelView, so it ends up as its sibling and is rendered
     // once the voxel scene is already on screen.
-    root_view->add_child(std::make_unique<UIView>(root_view.get()));
+    auto ui_view_node = std::make_unique<UIView>(root_view.get());
+    auto ui_view = ui_view_node.get();
+    root_view->add_child(std::move(ui_view_node));
+
+    // Title, pinned to the top of the window. It carries a background, as the
+    // sky behind it is nearly the same colour as the text.
+    auto title = std::make_unique<UILabel>(ui_view, "business game",
+        Rectangle{0.0f, 12.0f, 0.0f, 0.0f}, Anchor::TOP_CENTER);
+    title->font_size = 32.0f;
+    title->background = ui_view->style.background;
+    ui_view->add_child(std::move(title));
+
+    // Does the same as the U key, to show a button driving the scene
+    ui_view->add_child(std::make_unique<UIButton>(ui_view, "Toggle Sun",
+        [voxel_view] {
+            Light& sun = voxel_view->lights[voxel_view->sun_light_id];
+            sun.enabled = !sun.enabled;
+        },
+        Rectangle{16.0f, 16.0f, 0.0f, 0.0f}, Anchor::BOTTOM_LEFT));
 
     // voxel_editor = VoxelEditor();
     TraceLog(LOG_DEBUG, "main init finished!");
@@ -58,6 +79,10 @@ void global::shutdown() {
     // TODO: this function should be called, but it produces a double free
     //  figure out how to call it without the error
     // UnloadShader(shader);
+
+    // The view tree is torn down before the window, so that anything it holds
+    // on the GPU (UI textures, meshes) is released while the context is alive.
+    root_view.reset();
 
     raylib::Window::Close();
 }

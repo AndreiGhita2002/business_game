@@ -49,6 +49,28 @@ const UIStyle& UINode::style() {
     return fallback;
 }
 
+Vector2 anchor_in_rect(const Vector2 size, const Rectangle container, const Anchor anchor) {
+    const auto anchor_id = static_cast<unsigned char>(anchor);
+    const int column = anchor_id % 3;
+    const int row = anchor_id / 3;
+
+    float x;
+    switch (column) {
+        case 1:  x = container.x + (container.width - size.x) * 0.5f; break;
+        case 2:  x = container.x + container.width - size.x;          break;
+        default: x = container.x;
+    }
+
+    float y;
+    switch (row) {
+        case 1:  y = container.y + (container.height - size.y) * 0.5f; break;
+        case 2:  y = container.y + container.height - size.y;          break;
+        default: y = container.y;
+    }
+
+    return Vector2{x, y};
+}
+
 void UINode::resolve_layout(const Rectangle parent_rect) {
     Vector2 size = Vector2{bounds.width, bounds.height};
     // An axis left at <= 0 is handed over to the element itself
@@ -58,25 +80,15 @@ void UINode::resolve_layout(const Rectangle parent_rect) {
         if (size.y <= 0.0f) size.y = measured.y;
     }
 
+    Vector2 position = anchor_in_rect(size, parent_rect, anchor);
+
+    // The margins in bounds.x/y always point into the parent, so they change
+    // sign on the far edges.
     const auto anchor_id = static_cast<unsigned char>(anchor);
-    const int column = anchor_id % 3;
-    const int row = anchor_id / 3;
+    position.x += (anchor_id % 3 == 2) ? -bounds.x : bounds.x;
+    position.y += (anchor_id / 3 == 2) ? -bounds.y : bounds.y;
 
-    float x;
-    switch (column) {
-        case 1:  x = parent_rect.x + (parent_rect.width - size.x) * 0.5f + bounds.x; break;
-        case 2:  x = parent_rect.x + parent_rect.width - size.x - bounds.x;          break;
-        default: x = parent_rect.x + bounds.x;
-    }
-
-    float y;
-    switch (row) {
-        case 1:  y = parent_rect.y + (parent_rect.height - size.y) * 0.5f + bounds.y; break;
-        case 2:  y = parent_rect.y + parent_rect.height - size.y - bounds.y;          break;
-        default: y = parent_rect.y + bounds.y;
-    }
-
-    screen_rect = Rectangle{x, y, size.x, size.y};
+    screen_rect = Rectangle{position.x, position.y, size.x, size.y};
 
     // Children are placed inside the rectangle that was just resolved.
     // The child chain is walked here, so a node never resolves its own siblings.

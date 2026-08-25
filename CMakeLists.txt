@@ -65,6 +65,12 @@ add_executable(${PROJECT_NAME}
         src/ui/UINode.hpp
         src/ui/UIView.cpp
         src/ui/UIView.hpp
+        src/ui/UILabel.cpp
+        src/ui/UILabel.hpp
+        src/ui/UIButton.cpp
+        src/ui/UIButton.hpp
+        src/ui/UIImage.cpp
+        src/ui/UIImage.hpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

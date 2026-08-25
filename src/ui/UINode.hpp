@@ -25,6 +25,14 @@ enum class Anchor : unsigned char {
 };
 
 /**
+ * Places a box of `size` inside `container` according to `anchor`.
+ * Returns the top left corner of the box, in the same space as `container`.
+ * Used for the layout of the elements themselves, and for aligning their
+ * content (a text run, a texture) inside their own rectangle.
+ */
+Vector2 anchor_in_rect(Vector2 size, Rectangle container, Anchor anchor);
+
+/**
  * Abstract class for UI elements.
  * Equivalent to VoxelGrid, but for UI.
  *
