@@ -56,6 +56,7 @@ add_executable(${PROJECT_NAME}
         src/voxel/voxelMap.hpp
         src/voxel/VoxelMesher.cpp
         src/voxel/VoxelMesher.hpp
+        src/voxel/VoxelGrid.cpp
         src/voxel/VoxelGrid.hpp
         src/voxel/SingleChunkGrid.cpp
         src/voxel/SingleChunkGrid.hpp

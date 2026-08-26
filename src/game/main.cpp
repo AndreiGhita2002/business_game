@@ -181,25 +181,14 @@ void apply_transform(Vector3* position, Quaternion* rotation, Vector3* scale, co
 }
 
 Matrix voxel_model_matrix(const VoxelGrid* grid, const ModelInfo& model_info) {
-    // Offset
-    auto offset = apply_transform_trans(model_info.transform.translation, grid->transform);
-    // Rotation
-    Quaternion q = model_info.transform.rotation;
-    // Scale
-    auto scale = model_info.transform.scale;
+    // Two steps, in the order a scene graph applies them: the model sits
+    // somewhere inside its grid, and the grid sits somewhere in the world,
+    // which is its own transform with every parent's folded in.
+    const Transform world = transform_transform(model_info.transform, grid->get_world_transform());
 
-    // Grid transform
-    apply_transform(&offset, &q, &scale, grid->transform);
-    auto axis = Vector3{};
-    auto angle = 0.0f;
-    QuaternionToAxisAngle(q, &axis, &angle);
-
-    // Same order as DrawModelEx: scale, rotate, translate, then the model's own
-    // transform on top of it
-    Matrix mat = MatrixMultiply(
-        MatrixMultiply(MatrixScale(scale.x, scale.y, scale.z), MatrixRotate(axis, angle)),
-        MatrixTranslate(offset.x, offset.y, offset.z));
-    return MatrixMultiply(model_info.model.transform, mat);
+    // transform_to_matrix uses the same order as DrawModelEx - scale, rotate,
+    // translate - and the model's own matrix goes on top of it
+    return MatrixMultiply(model_info.model.transform, transform_to_matrix(world));
 }
 
 bool find_voxel_on_ray(const Ray ray, const std::vector<VoxelGrid*>* voxel_grids,

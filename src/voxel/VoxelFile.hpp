@@ -82,9 +82,9 @@ struct LoadContext {
     const Header* header;
     // The palette read from the file, or the shared one the caller asked for.
     VoxelColourMap palette;
-    // Applied to the grid by load_grid() after the loader returns, so a loader
-    // must not build any models: VoxelMap::set_transform folds the transform
-    // into the models it already has.
+    // The grid's local transform, applied by load_grid() once the loader has
+    // returned. A loaded grid has no parent, so this is also where it lands in
+    // the world until something calls set_parent() on it.
     Transform transform;
 };
 

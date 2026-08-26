@@ -145,26 +145,34 @@ VoxelGrid* VoxelMap::load_body(std::istream& in, const voxel_file::LoadContext& 
 }
 
 void VoxelMap::update_models() {
+    // Where the map itself sits, its own transform with every parent's on top.
+    // The same for every chunk, so it is only worked out once.
+    const Transform world = get_world_transform();
+
     for (auto it = chunks.begin(); it != chunks.end(); ++it) {
         auto chunk_pos = it->first;
         auto chunk = &it->second;
         auto chunk_model = chunk_models.find(chunk_pos);
 
-        // calculating the position of the chunk in render space
-        // Chunk (cx, cy) holds the global columns 16cx to 16cx+15, and a voxel
-        // spans one unit, so chunks sit CHUNK_SIZE apart and meet exactly. A
-        // smaller spacing would overlap them and draw two different columns of
-        // terrain in the same place.
-        auto model_transform = transform;
-        model_transform.translation = Vector3Add(model_transform.translation, Vector3{
-            static_cast<float>(it->first.x) * CHUNK_SIZE,
+        // Where the chunk sits inside the map. Chunk (cx, cy) holds the global
+        // columns 16cx to 16cx+15, and a voxel spans one unit, so chunks sit
+        // CHUNK_SIZE apart and meet exactly. A smaller spacing would overlap
+        // them and draw two different columns of terrain in the same place.
+        // What the map is doing is left out of this on purpose: it is applied
+        // on top by voxel_model_matrix() when the chunk is drawn, so that a
+        // moved map does not need remeshing.
+        auto model_transform = identity();
+        model_transform.translation = Vector3{
+            static_cast<float>(chunk_pos.x) * CHUNK_SIZE,
             0.0,
-            static_cast<float>(it->first.y) * CHUNK_SIZE
-        });
+            static_cast<float>(chunk_pos.y) * CHUNK_SIZE
+        };
 
-        // render distance check
+        // render distance check, which is a question about the world and so
+        // needs the chunk carried out of the map's space first
         if (chunk_model != chunk_models.end() && global::limit_render_distance) {
-            chunk_model->second.do_render = view->isInRenderDistance(model_transform.translation);
+            const Transform chunk_world = transform_transform(model_transform, world);
+            chunk_model->second.do_render = view->isInRenderDistance(chunk_world.translation);
         }
 
         if (chunk_was_updated[chunk_pos]) {
@@ -191,13 +199,6 @@ std::vector<ModelInfo*> VoxelMap::get_models() {
         }
     }
     return out;
-}
-
-void VoxelMap::set_transform(Transform new_transform) {
-    transform = new_transform;
-    for (auto it = chunk_models.begin(); it != chunk_models.end(); ++it) {
-        it->second.transform = transform_transform(it->second.transform, new_transform);
-    }
 }
 
 bool VoxelMap::set_voxel(const Int3 grid_pos, const VoxelID id) {

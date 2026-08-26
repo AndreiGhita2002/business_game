@@ -11,7 +11,9 @@
 
 class SingleChunkGrid final : public VoxelGrid {
 public:
-    Transform transform;
+    // No `transform` of its own: this used to declare one, which hid
+    // VoxelGrid::transform and left the two disagreeing. The one in the base
+    // class is the grid's local transform, see VoxelGrid::get_world_transform.
     VoxelChunk data;
     bool was_updated;
 
@@ -22,10 +24,8 @@ public:
     VoxelID *get_voxel(Int3 grid_pos) override;
     void update_models() override;
     std::vector<ModelInfo*> get_models() override;
-    void set_transform(Transform new_transform) override;
     bool set_voxel(Int3 grid_pos, VoxelID id) override;
     bool model_to_grid(const ModelInfo* model, Vector3 local_pos, Int3* out) override;
-    Transform get_transform() const override;
 
     /**
      * The grid's body in a saved file: one voxel_file chunk, nothing else. The

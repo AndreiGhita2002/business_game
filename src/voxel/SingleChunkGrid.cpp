@@ -39,7 +39,11 @@ VoxelID* SingleChunkGrid::get_voxel(Int3 grid_pos) {
 }
 
 void SingleChunkGrid::update_models() {
-    if (view->isInRenderDistance(transform.translation)) {
+    // The render distance is a question about the world, so the grid's own
+    // transform is not enough: a grid hanging off a moved parent has moved too
+    const Transform world = get_world_transform();
+
+    if (view->isInRenderDistance(world.translation)) {
         if (was_updated) {
             auto meshes = build_chunk_mesh(data, Vector3{0.0,0.0,0.0}, 1.0f);
             auto new_model = build_chunk_model(meshes, *voxel_colours);
@@ -48,19 +52,16 @@ void SingleChunkGrid::update_models() {
             // editor meshes this grid again on every voxel it places
             if (model.has_value()) unload_chunk_model(model->model);
 
-            model = ModelInfo{true, new_model, transform};
+            // The mesh is built at the grid's own origin, so the model sits at
+            // identity inside the grid. Where the grid is in the world is added
+            // by voxel_model_matrix() at draw time, which is why moving a grid
+            // never needs a remesh.
+            model = ModelInfo{true, new_model, identity()};
 
             was_updated = false;
         }
     } else if (model.has_value()) {
         model->do_render = false;
-    }
-}
-
-void SingleChunkGrid::set_transform(Transform new_transform) {
-    transform = new_transform;
-    if (model.has_value()) {
-        model->transform = new_transform;
     }
 }
 
@@ -87,13 +88,6 @@ bool SingleChunkGrid::model_to_grid(const ModelInfo* model, const Vector3 local_
         static_cast<int>(floorf(local_pos.y)),
     };
     return true;
-}
-
-Transform SingleChunkGrid::get_transform() const {
-    // This class declares its own `transform`, which hides VoxelGrid::transform
-    // and is the one everything here writes and meshes with. The base member
-    // stays at identity, so saving has to be pointed at this one.
-    return transform;
 }
 
 bool SingleChunkGrid::write_body(std::ostream& out) {

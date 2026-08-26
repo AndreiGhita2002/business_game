@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 // #include "voxel/VoxelView.hpp"
 class VoxelView;
@@ -64,6 +65,9 @@ struct ModelInfo {
 
 class VoxelGrid {
 public:
+    // Where this grid sits relative to its parent, or relative to the world
+    // when it has none. Anything that draws, picks or measures a distance wants
+    // get_world_transform() instead, which folds the parents in.
     Transform transform;
     VoxelColourMap voxel_colours;
 
@@ -83,15 +87,49 @@ public:
     // managed by their respective grid
     virtual std::vector<ModelInfo*> get_models() = 0;
 
-    virtual void set_transform(Transform new_transform) = 0;
+    // --- Transforms ---
+    // Every grid handles these the same way, so none of them are virtual.
+
+    /** Where the grid sits relative to its parent. What saving writes out. */
+    Transform get_transform() const { return transform; }
+    void set_transform(const Transform new_transform) { transform = new_transform; }
 
     /**
-     * The transform this grid is actually drawn with. VoxelGrid::transform is
-     * the right answer for most grids, so this only needs overriding by a grid
-     * that keeps the authoritative transform somewhere else. Saving reads the
-     * transform through here.
+     * Where the grid sits in the world: its own transform with every parent's
+     * applied on top of it, up to the root. This is the one that rendering,
+     * picking and render distance checks go through, so that moving a parent
+     * moves everything hanging off it.
+     *
+     * Worked out on every call rather than cached, as the chain is short and a
+     * cache would go stale the moment someone wrote to `transform` directly.
+     * Still worth holding on to the result rather than calling it per model.
      */
-    virtual Transform get_transform() const { return transform; }
+    Transform get_world_transform() const;
+
+    // --- Hierarchy ---
+    // The links are not owning: a grid is owned by whatever created it (the
+    // VoxelView holds them all in voxel_grids), and these only say what moves
+    // with what.
+
+    VoxelGrid* get_parent() const { return parent; }
+    const std::vector<VoxelGrid*>& get_children() const { return children; }
+
+    /**
+     * Hangs this grid off another one, so that moving the parent moves this
+     * grid with it. The local transform is left alone, so the grid moves to
+     * wherever the parent puts it. Pass nullptr to detach.
+     *
+     * Refuses a parent that is this grid or already below it, which would make
+     * get_world_transform() recurse forever.
+     * @return false when the parent was refused.
+     */
+    bool set_parent(VoxelGrid* new_parent);
+
+    /** set_parent() the other way round. */
+    bool add_child(VoxelGrid* child);
+
+    /** Whether this grid is somewhere above `other` in the tree. */
+    bool is_ancestor_of(const VoxelGrid* other) const;
 
     /**
      * Writes everything about this grid that the file's header and common
@@ -119,10 +157,17 @@ public:
     virtual bool model_to_grid(const ModelInfo* model, Vector3 local_pos, Int3* out) = 0;
 
     explicit VoxelGrid(VoxelView* view) : transform(identity()), view(view) {}
-    virtual ~VoxelGrid() = default;
+    virtual ~VoxelGrid();
 protected:
     // The view responsible for drawing this grid;
     VoxelView* view;
+
+    // Whatever this grid hangs off, and whatever hangs off it. Neither is owned.
+    VoxelGrid* parent = nullptr;
+    std::vector<VoxelGrid*> children;
+
+    /** Drops a child from `children` without touching the child itself. */
+    void forget_child(const VoxelGrid* child);
 
     // helper: floor division/modulo that work for negatives
     static int floordiv(const int a, const int b) {

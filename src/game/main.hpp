@@ -53,7 +53,9 @@ struct VoxelRayHit {
 };
 
 /**
- * The matrix a voxel model is drawn with.
+ * The matrix a voxel model is drawn with: the model's place inside its grid,
+ * then the grid's place in the world (VoxelGrid::get_world_transform, so every
+ * parent grid is folded in).
  * Both the renderer and the ray casts go through this, so that what is on the
  * screen and what a click hits can never drift apart.
  */

@@ -164,8 +164,9 @@ void write_common(std::ostream& out, VoxelGrid* grid) {
         }
     }
 
-    // get_transform() rather than the member, as a grid may keep the
-    // authoritative transform somewhere else
+    // The local transform, not the world one: a grid saved while hanging off a
+    // parent is stored where it sits inside that parent, so loading it back
+    // under the same parent puts it in the same place
     const Transform t = grid->get_transform();
     voxel_file::write_f32(out, t.translation.x);
     voxel_file::write_f32(out, t.translation.y);

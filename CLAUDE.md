@@ -39,6 +39,31 @@ The UI/scene uses a `ViewNode` tree hierarchy with recursive update/render trave
 
 **VoxelMesher** (`src/voxel/VoxelMesher.cpp/hpp`) converts voxel data to 3D meshes with per-material generation.
 
+### Grid Transforms
+
+Grids form their own tree, separate from the ViewNode tree, and compose
+transforms the way any scene graph does (`src/voxel/VoxelGrid.cpp`):
+
+- `VoxelGrid::transform` is **local**: where the grid sits relative to its
+  parent, or relative to the world when it has none. `get_transform()` /
+  `set_transform()` are the accessors, and saving writes this one.
+- `get_world_transform()` walks up the parent chain and folds each transform in
+  (`transform_transform(local, parent_world)`). Everything that draws, picks or
+  measures a distance goes through it: `voxel_model_matrix()` and so both
+  `VoxelView::drawVoxelModel` and `find_voxel_on_ray`, and the render distance
+  checks in `update_models()`. It is recomputed per call, not cached.
+- `set_parent()` / `add_child()` build the tree. The links do not own anything -
+  the VoxelView still owns every grid in `voxel_grids` - and a parent that is
+  already below the grid is refused, as that would make `get_world_transform()`
+  recurse forever. A grid whose parent is destroyed keeps its world place.
+- `ModelInfo::transform` is **local to its grid**, so a VoxelMap chunk carries
+  only its chunk offset and a SingleChunkGrid model is at identity. Nothing
+  bakes the grid transform into a model, which is why moving a grid never needs
+  a remesh.
+
+Three levels compose at draw time: model inside grid, grid inside its parents,
+parents in the world.
+
 ### Grid Files (VoxelFile)
 
 `src/voxel/VoxelFile.cpp/hpp` saves and loads grids as `.bgvox` files: a
@@ -74,9 +99,8 @@ palette_size: 12
 - `load_grid()` takes an optional palette to put the new grid on the scene's
   colours instead of the ones in the file. It returns a grid owned by the
   caller; nothing has been added to a VoxelView's `voxel_grids` yet.
-- Loaders must not build models: `load_grid()` applies the transform with
-  `set_transform()` afterwards, and `VoxelMap::set_transform` folds a transform
-  into the models a grid already has.
+- The transform written out is the grid's local one, so a grid saved while
+  hanging off a parent comes back in the same place under that parent.
 - No UI for this yet.
 
 ### Rendering Pipeline (VoxelView)
