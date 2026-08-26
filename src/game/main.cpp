@@ -124,9 +124,7 @@ void global::init() {
 }
 
 void global::shutdown() {
-    // TODO: this function should be called, but it produces a double free
-    //  figure out how to call it without the error
-    // UnloadShader(shader);
+    UnloadShader(voxel_shader);
 
     // The view tree is torn down before the window, so that anything it holds
     // on the GPU (UI textures, meshes) is released while the context is alive.
