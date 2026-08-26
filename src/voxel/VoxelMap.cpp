@@ -6,11 +6,14 @@
 
 #include "PerlinNoise.hpp"
 #include <raylib-cpp.hpp>
+#include <istream>
+#include <ostream>
 
 #include "voxel/VoxelMesher.hpp"
 #include "game/main.hpp"
 
-VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y)
+VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y,
+                   const bool generate_terrain)
     : VoxelGrid(view)
 {
     this->size = Int2(size_x, size_y);
@@ -20,6 +23,7 @@ VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y
 
     this->transform = identity();
 
+    //TODO (optimisation) colorMaps should be shared between grids, somewhere global
     this->voxel_colours = std::make_shared<std::map<VoxelID, Color>>();
     auto colorMap = this->voxel_colours.get();
     colorMap->insert(std::pair<VoxelID, Color>(0, RED)); // air, should not be seen
@@ -43,6 +47,9 @@ VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y
             chunk_was_updated[Int2(ix, iy)] = true;
         }
     }
+
+    // A map that is about to be read out of a file keeps its chunks as air
+    if (!generate_terrain) return;
 
     const siv::PerlinNoise::seed_type seed = 123456u;
     const siv::PerlinNoise perlin{ seed };
@@ -75,8 +82,66 @@ VoxelMap::~VoxelMap() {
 }
 
 std::string & VoxelMap::get_grid_type() {
-    static std::string TYPE = "VoxelMap";
+    static std::string TYPE = VOXEL_MAP_STR;
     return TYPE;
+}
+
+bool VoxelMap::write_body(std::ostream& out) {
+    voxel_file::write_i32(out, size.x);
+    voxel_file::write_i32(out, size.y);
+    voxel_file::write_u32(out, static_cast<uint32_t>(chunks.size()));
+
+    for (const auto& [chunk_pos, chunk] : chunks) {
+        voxel_file::write_i32(out, chunk_pos.x);
+        voxel_file::write_i32(out, chunk_pos.y);
+        // The voxels go out in the shared format, the same one a single chunk
+        // grid uses, so only the chunk grid around them is particular to a map
+        if (!voxel_file::write_chunk(out, chunk)) return false;
+    }
+    return out.good();
+}
+
+VoxelGrid* VoxelMap::load_body(std::istream& in, const voxel_file::LoadContext& ctx) {
+    int32_t size_x = 0, size_y = 0;
+    uint32_t chunk_count = 0;
+    if (!voxel_file::read_i32(in, &size_x) ||
+        !voxel_file::read_i32(in, &size_y) ||
+        !voxel_file::read_u32(in, &chunk_count))
+        return nullptr;
+
+    if (size_x <= 0 || size_y <= 0) {
+        TraceLog(LOG_WARNING, "VOXELMAP: file asks for a %i by %i map", size_x, size_y);
+        return nullptr;
+    }
+    // A corrupt count would otherwise send the loop below allocating chunks
+    // until the read finally fails
+    const uint32_t chunks_x = size_x / CHUNK_SIZE + (size_x % CHUNK_SIZE ? 1 : 0);
+    const uint32_t chunks_y = size_y / CHUNK_SIZE + (size_y % CHUNK_SIZE ? 1 : 0);
+    if (chunk_count > chunks_x * chunks_y) {
+        TraceLog(LOG_WARNING, "VOXELMAP: file holds %u chunks, a %i by %i map has room for %u",
+                 chunk_count, size_x, size_y, chunks_x * chunks_y);
+        return nullptr;
+    }
+
+    // The chunks are read into a map that already holds air, so a file that
+    // leaves some of them out still gives a complete grid
+    auto* map = new VoxelMap(ctx.view, static_cast<uint32_t>(size_x), static_cast<uint32_t>(size_y), false);
+    if (ctx.palette) map->voxel_colours = ctx.palette;
+
+    for (uint32_t i = 0; i < chunk_count; ++i) {
+        int32_t chunk_x = 0, chunk_y = 0;
+        if (!voxel_file::read_i32(in, &chunk_x) || !voxel_file::read_i32(in, &chunk_y)) {
+            delete map;
+            return nullptr;
+        }
+        const Int2 chunk_pos{chunk_x, chunk_y};
+        if (!voxel_file::read_chunk(in, &map->chunks[chunk_pos])) {
+            delete map;
+            return nullptr;
+        }
+        map->chunk_was_updated[chunk_pos] = true;
+    }
+    return map;
 }
 
 void VoxelMap::update_models() {

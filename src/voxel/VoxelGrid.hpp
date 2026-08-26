@@ -5,7 +5,10 @@
 #ifndef BUSINESS_GAME_VOXELGRID_HPP
 #define BUSINESS_GAME_VOXELGRID_HPP
 #include <raylib.h>
+#include <array>
+#include <iosfwd>
 #include <map>
+#include <memory>
 #include <string>
 
 // #include "voxel/VoxelView.hpp"
@@ -64,6 +67,11 @@ public:
     Transform transform;
     VoxelColourMap voxel_colours;
 
+    // What a saved file carries in its readable header. Empty for a grid that
+    // was built in code and never saved or loaded. See VoxelFile.hpp.
+    std::string name;
+    std::string description;
+
     virtual std::string& get_grid_type() = 0;
     virtual Int2 get_size() = 0;
     virtual VoxelID* get_voxel(Int3 grid_pos) = 0;
@@ -76,6 +84,25 @@ public:
     virtual std::vector<ModelInfo*> get_models() = 0;
 
     virtual void set_transform(Transform new_transform) = 0;
+
+    /**
+     * The transform this grid is actually drawn with. VoxelGrid::transform is
+     * the right answer for most grids, so this only needs overriding by a grid
+     * that keeps the authoritative transform somewhere else. Saving reads the
+     * transform through here.
+     */
+    virtual Transform get_transform() const { return transform; }
+
+    /**
+     * Writes everything about this grid that the file's header and common
+     * section do not already carry, so its own size and its voxels.
+     *
+     * The layout is up to each grid - a chunked grid writes chunks, a grid with
+     * one block of voxels writes one - but every voxel must go through
+     * voxel_file::write_chunk, so that voxels have the same format everywhere.
+     * Returns false on a write error.
+     */
+    virtual bool write_body(std::ostream& out) = 0;
 
     /**
      * Writes a voxel and marks whatever has to be meshed again.

@@ -5,6 +5,9 @@
 #include "SingleChunkGrid.hpp"
 
 #include <cmath>
+#include <istream>
+#include <memory>
+#include <ostream>
 
 #include "VoxelMesher.hpp"
 #include "game/main.hpp"
@@ -84,6 +87,33 @@ bool SingleChunkGrid::model_to_grid(const ModelInfo* model, const Vector3 local_
         static_cast<int>(floorf(local_pos.y)),
     };
     return true;
+}
+
+Transform SingleChunkGrid::get_transform() const {
+    // This class declares its own `transform`, which hides VoxelGrid::transform
+    // and is the one everything here writes and meshes with. The base member
+    // stays at identity, so saving has to be pointed at this one.
+    return transform;
+}
+
+bool SingleChunkGrid::write_body(std::ostream& out) {
+    return voxel_file::write_chunk(out, data);
+}
+
+VoxelGrid* SingleChunkGrid::load_body(std::istream& in, const voxel_file::LoadContext& ctx) {
+    // Without a palette from the caller or the file the grid still needs a map
+    // to look colours up in, even if nothing in it can be drawn
+    const VoxelColourMap palette = ctx.palette
+        ? ctx.palette
+        : std::make_shared<std::map<VoxelID, Color>>();
+
+    auto* grid = new SingleChunkGrid(ctx.view, palette);
+    if (!voxel_file::read_chunk(in, &grid->data)) {
+        delete grid;
+        return nullptr;
+    }
+    grid->was_updated = true;
+    return grid;
 }
 
 std::vector<ModelInfo *> SingleChunkGrid::get_models() {

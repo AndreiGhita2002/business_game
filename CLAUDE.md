@@ -39,6 +39,46 @@ The UI/scene uses a `ViewNode` tree hierarchy with recursive update/render trave
 
 **VoxelMesher** (`src/voxel/VoxelMesher.cpp/hpp`) converts voxel data to 3D meshes with per-material generation.
 
+### Grid Files (VoxelFile)
+
+`src/voxel/VoxelFile.cpp/hpp` saves and loads grids as `.bgvox` files: a
+readable `key: value` header followed by a binary blob.
+
+```
+BGVOX 1                      <- magic and format version, always line one
+name: my grid
+description: whatever this grid is
+type: VoxelMap               <- picks the loader
+voxel_bytes: 1
+chunk_size: 16
+palette_size: 12
+--- BINARY ---               <- everything past this line's newline is binary
+<common section: palette, then the transform as 10 floats>
+<grid specific body>
+```
+
+- `voxel_file::save_grid()` writes the header and the common section, then
+  hands the stream to `VoxelGrid::write_body()`, which each grid implements.
+- `voxel_file::load_grid()` reads the header and common section, then
+  dispatches on `type` to the loader registered for it
+  (`VoxelMap::load_body`, `SingleChunkGrid::load_body`). New grid types call
+  `voxel_file::register_grid_loader()`. `voxel_file::read_header()` reads only
+  the readable part, for listing a directory of files.
+- The body layout is per grid - VoxelMap writes its size and then one block per
+  chunk, SingleChunkGrid writes a single block - but the voxels inside always
+  go through `voxel_file::write_chunk`/`read_chunk`, so voxels have the same
+  format in every grid. That block is raw or run length encoded, whichever is
+  smaller, and carries its own byte count so an unwanted chunk can be skipped.
+- Integers are little endian and floats are written as their bit pattern, so
+  files move between machines.
+- `load_grid()` takes an optional palette to put the new grid on the scene's
+  colours instead of the ones in the file. It returns a grid owned by the
+  caller; nothing has been added to a VoxelView's `voxel_grids` yet.
+- Loaders must not build models: `load_grid()` applies the transform with
+  `set_transform()` afterwards, and `VoxelMap::set_transform` folds a transform
+  into the models a grid already has.
+- No UI for this yet.
+
 ### Rendering Pipeline (VoxelView)
 
 Three-pass system in `src/voxel/VoxelView.cpp/hpp`:

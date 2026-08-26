@@ -79,17 +79,12 @@ void VoxelView::render() {
     BeginMode3D(camera); {
         drawVoxelScene();
 
-        // Shader Mode is only necessary for immediate draw calls
-        BeginShaderMode(*voxel_shader); {
-            // Test Cube
-            DrawCube(Vector3{0.0, 0.0, 0.0}, 1.0, 1.0, 1.0, ORANGE);
-        }
-        EndShaderMode();
-
         // Draw spheres to show where the lights are
         for (Light& light : lights) {
             if (light.enabled) DrawSphereEx(light.position, 0.2f, 8, 8, light.color);
-            else DrawSphereWires(light.position, 0.2f, 8, 8, ColorAlpha(light.color, 0.3f));
+            // only draw disabled light if it is not the light camera while it is attached to camera
+            else if (light.id != this->camera_light_id || !this->move_camera_light)
+                DrawSphereWires(light.position, 0.2f, 8, 8, ColorAlpha(light.color, 0.3f));
         }
     }
     EndMode3D();
