@@ -351,7 +351,6 @@ take the narrow header instead of dragging in the window and the view tree.
 
 ## Known Issues (from TODOs in code)
 
-- Double-free bug with UnloadShader (commented out in main.cpp:52)
 - The mesher treats out-of-chunk neighbours as air, so every chunk emits a wall
   of hidden faces along its borders. Stitching neighbouring chunks would drop
   them (noted in `VoxelMesher.cpp`).
