@@ -215,8 +215,8 @@ public:
     bool snap_to_anchor();
 
     /**
-     * Writes everything about this grid that the file's header and common
-     * section do not already carry, so its own size and its voxels.
+     * Writes everything about this grid that its file header, palette and
+     * transform do not already carry, so its own size and its voxels.
      *
      * The layout is up to each grid - a chunked grid writes chunks, a grid with
      * one block of voxels writes one - but every voxel must go through
