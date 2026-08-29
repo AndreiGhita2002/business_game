@@ -91,7 +91,8 @@ still its own.
 - `detach()` moves the grid up one step, to the anchor's own parent, and keeps it
   standing where it was (`transform_relative_to()` in `main.cpp` redoes the local
   transform against the new parent). Destroying an anchor does the same.
-- Not saved yet: a `.bgvox` file carries the tree, not the connector voxels.
+- Saved with the grid: the connector voxels go in its header block in a
+  `.bgvox` file, see Grid Files below.
 
 ### Grid Files (VoxelFile)
 
@@ -122,6 +123,8 @@ name: crate
 description: sits on the map
 parent: 0
 children:
+anchor_voxel: 8 3 2          <- attached to the parent at this voxel of it
+connector_voxel: 1 1 1       <- held there by this voxel of its own
 palette_source: parent       <- shares the parent's colours, so no palette in
 palette_size: 0                 its body
 
@@ -138,6 +141,14 @@ palette_size: 0                 its body
   structure at all - the tree is rebuilt from the headers alone.
 - Both directions are written, so either `parent` or `children` alone is enough
   to reassemble. Disagreements are logged and `parent` wins.
+- An **attachment** is that parent link plus a connector voxel on each side, so
+  only the voxels go in the grid's header: `anchor_voxel` in the parent's
+  coordinates, `connector_voxel` in the grid's own. Both lines or neither. They
+  are applied once the whole tree is parented, with snapping off, so a grid
+  comes back where it was saved rather than being pulled onto its anchor again.
+  A grid without them is merely hanging off its parent, which is what every file
+  written before this carries - the version is still 3, as an older build keeps
+  unknown keys and simply ignores these.
 - **Bodies are found by id, not by position.** They are indexed in one pass
   first (each names its id and its length), so bodies out of header order, or a
   loader that reads the wrong number of bytes, are logged and worked around

@@ -123,6 +123,25 @@ std::string format_id_list(const std::vector<uint32_t>& ids) {
     return out.str();
 }
 
+/** "4 5 6" into the grid coordinate it names. */
+bool parse_int3(const std::string& value, Int3* out) {
+    // Commas are allowed here too, so a hand written line can use either
+    std::string cleaned = value;
+    std::replace(cleaned.begin(), cleaned.end(), ',', ' ');
+
+    std::istringstream stream(cleaned);
+    int x = 0, y = 0, z = 0;
+    if (!(stream >> x >> y >> z)) return false;
+    *out = Int3{x, y, z};
+    return true;
+}
+
+std::string format_int3(const Int3& v) {
+    std::ostringstream out;
+    out << v.x << ' ' << v.y << ' ' << v.z;
+    return out.str();
+}
+
 /** Splits a "key: value" line. Returns false for a line that is not one. */
 bool parse_field(const std::string& line, std::string* key, std::string* value) {
     const size_t colon = line.find(':');
@@ -148,6 +167,23 @@ void resolve_grid_header(voxel_file::GridHeader* grid) {
     }
     if (const std::string* v = grid->find("children")) grid->children = parse_id_list(*v);
     if (const std::string* v = grid->find("palette_source")) grid->palette_from_parent = (*v == "parent");
+
+    // An attachment needs both of its connectors to mean anything, so half of
+    // one is dropped rather than guessed at
+    const std::string* anchor = grid->find("anchor_voxel");
+    const std::string* connector = grid->find("connector_voxel");
+    if (anchor != nullptr || connector != nullptr) {
+        Int3 anchor_voxel{}, connector_voxel{};
+        if (anchor != nullptr && connector != nullptr &&
+            parse_int3(*anchor, &anchor_voxel) && parse_int3(*connector, &connector_voxel)) {
+            grid->has_attachment = true;
+            grid->anchor_voxel = anchor_voxel;
+            grid->connector_voxel = connector_voxel;
+        } else {
+            TraceLog(LOG_WARNING, "VOXELFILE: grid %u carries only half an attachment, ignoring it",
+                     grid->id);
+        }
+    }
 }
 
 /**
@@ -528,6 +564,15 @@ bool voxel_file::save_grid(VoxelGrid* grid, const std::string& path) {
         if (g_parent != nullptr && ids.count(g_parent)) out << ids[g_parent] << '\n';
         else out << "none" << '\n';
         out << "children: " << format_id_list(child_ids) << '\n';
+
+        // An attachment is the parent link, which is already written above,
+        // plus the voxel on each side that holds the two together
+        if (const Attachment* attachment = g->get_attachment();
+            attachment != nullptr && attachment->anchor == g_parent) {
+            out << "anchor_voxel: " << format_int3(attachment->anchor_voxel) << '\n';
+            out << "connector_voxel: " << format_int3(attachment->local_voxel) << '\n';
+        }
+
         out << "palette_source: " << (shares ? "parent" : "own") << '\n';
         out << "palette_size: " << (shares || !g->voxel_colours ? 0 : g->voxel_colours->size()) << '\n';
     }
@@ -745,6 +790,27 @@ VoxelGrid* voxel_file::load_grid(const std::string& path, VoxelView* view,
         // root at all
         if (!built[grid_header.id]->set_parent(parent->second)) {
             TraceLog(LOG_WARNING, "VOXELFILE: grid %u cannot hang off %u", grid_header.id, parent_id);
+        }
+    }
+
+    // Attaching comes after the whole tree is hung together: a grid is already
+    // a child of its anchor by now, so only the connectors are left to name
+    for (const GridHeader& grid_header : header.grids) {
+        if (!grid_header.has_attachment) continue;
+
+        VoxelGrid* g = built[grid_header.id];
+        VoxelGrid* g_parent = g->get_parent();
+        if (g_parent == nullptr) {
+            TraceLog(LOG_WARNING, "VOXELFILE: grid %u carries connector voxels but hangs off "
+                                  "nothing, so it is not attached to anything", grid_header.id);
+            continue;
+        }
+
+        // Snapping is off on purpose: the transform read out of the file is
+        // where the grid was saved, and snapping would move it again from there
+        if (!g->attach_to(g_parent, grid_header.anchor_voxel, grid_header.connector_voxel, false)) {
+            TraceLog(LOG_WARNING, "VOXELFILE: grid %u could not be attached to its parent, it is "
+                                  "only hanging off it", grid_header.id);
         }
     }
 

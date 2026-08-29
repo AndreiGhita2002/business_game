@@ -26,8 +26,9 @@ This is how voxel grids should be able to be modified:
   - should stop being a child of said parent and gain the same parent as their old parent (move up in the hierarchy) 
   - `VoxelGrid::detach()`. The grid keeps the place it was standing in, and
     both connector voxels become ordinary voxels again.
-  - Still to do: no UI for either, and an attachment is not written to a
-    `.bgvox` file yet, so a saved tree comes back parented but not attached.
+  - Attachments are saved: the two connector voxels go in the grid's header
+    block in a `.bgvox` file, and a loaded tree comes back attached.
+  - Still to do: no UI for either, both are engine calls for now.
 -[ ] be modified by runtime scripts/systems
   - more on this when we decide how to implement these
 

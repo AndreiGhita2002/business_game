@@ -42,6 +42,8 @@ class VoxelView;
  *   description: sits on the map
  *   parent: 0
  *   children:
+ *   anchor_voxel: 8 3 2          <- attached to the parent, at this voxel of it
+ *   connector_voxel: 1 1 1       <- held there by this voxel of its own
  *   palette_source: parent       <- meshed with the parent's colours, so its
  *   palette_size: 0                 body carries no palette of its own
  *
@@ -56,6 +58,12 @@ class VoxelView;
  * it walks the tree. `parent` and `children` point at those numbers and are
  * what the tree is put back together from, so the bodies carry no structure at
  * all.
+ *
+ * An attachment (VoxelGrid::attach_to) is that parent link plus a connector
+ * voxel on each side, so only the two voxels are written: `anchor_voxel` in the
+ * parent's coordinates and `connector_voxel` in the grid's own. Both lines
+ * together or neither - a grid without them comes back merely hanging off its
+ * parent, which is what every file written before this carries.
  *
  *   <body>      := u32 id, u32 payload_bytes, <payload>
  *   <payload>   := [<palette>] <transform> <grid body>
@@ -102,6 +110,13 @@ struct GridHeader {
     // The ids of the grids hanging off this one. Says the same as the parent
     // fields the other way round, and either one is enough to rebuild the tree.
     std::vector<uint32_t> children;
+
+    // Whether the grid is attached to its parent rather than only hanging off
+    // it, and the two connector voxels holding them together: anchor_voxel in
+    // the parent's coordinates, connector_voxel in this grid's own.
+    bool has_attachment = false;
+    Int3 anchor_voxel{};
+    Int3 connector_voxel{};
 
     // Whether the grid shares its parent's colour map, in which case its body
     // carries no palette.
@@ -202,7 +217,9 @@ bool read_header(const std::string& path, Header* out);
 /**
  * Reads the headers, builds a grid per body through the loader registered for
  * its type, and hangs them off each other as the parent and children fields
- * say, so the whole tree comes back in the shape it was saved in.
+ * say, so the whole tree comes back in the shape it was saved in. A grid whose
+ * header carries connector voxels is attached to its parent afterwards, where
+ * it was saved rather than snapped onto it again.
  *
  * Nothing is added to a VoxelView by this: the grids still have to be put in
  * VoxelView::voxel_grids to be updated and drawn, children included, which is
