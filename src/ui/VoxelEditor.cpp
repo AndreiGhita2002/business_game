@@ -139,6 +139,11 @@ void VoxelEditor::update(const float delta_time) {
         if (target_grid->set_voxel(remove_pos, 0)) {
             TraceLog(LOG_DEBUG, "[EDITOR] Removed voxel at %d,%d,%d",
                      remove_pos.x, remove_pos.y, remove_pos.z);
+        } else if (target_grid->is_connector_voxel(remove_pos)) {
+            // The grid refuses this one while it is holding an attachment
+            // together, see VoxelGrid::attach_to
+            TraceLog(LOG_DEBUG, "[EDITOR] Voxel %d,%d,%d is a connector, detach the grids first",
+                     remove_pos.x, remove_pos.y, remove_pos.z);
         }
     }
 

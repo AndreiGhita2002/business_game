@@ -201,13 +201,16 @@ std::vector<ModelInfo*> VoxelMap::get_models() {
     return out;
 }
 
-bool VoxelMap::set_voxel(const Int3 grid_pos, const VoxelID id) {
-    // get_voxel() wraps out of range coordinates instead of rejecting them,
-    // so the bounds are checked before it is called
-    if (grid_pos.x < 0 || grid_pos.x >= size.x ||
-        grid_pos.y < 0 || grid_pos.y >= size.y ||
-        grid_pos.z < 0 || grid_pos.z >= CHUNK_SIZE)
-        return false;
+bool VoxelMap::in_bounds(const Int3 grid_pos) const {
+    // get_voxel() wraps an out of range coordinate into a chunk instead of
+    // rejecting it, so everything that reaches it comes through here first
+    return grid_pos.x >= 0 && grid_pos.x < size.x &&
+           grid_pos.y >= 0 && grid_pos.y < size.y &&
+           grid_pos.z >= 0 && grid_pos.z < CHUNK_SIZE;
+}
+
+bool VoxelMap::write_voxel(const Int3 grid_pos, const VoxelID id) {
+    if (!in_bounds(grid_pos)) return false;
 
     VoxelID* voxel = get_voxel(grid_pos);
     if (voxel == nullptr) return false;

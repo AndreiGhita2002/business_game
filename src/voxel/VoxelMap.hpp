@@ -32,7 +32,7 @@ public:
     Int2 get_size() override;
     void update_models() override;
     std::vector<ModelInfo*> get_models() override;
-    bool set_voxel(Int3 grid_pos, VoxelID id) override;
+    bool in_bounds(Int3 grid_pos) const override;
     bool model_to_grid(const ModelInfo* model, Vector3 local_pos, Int3* out) override;
 
     /**
@@ -52,6 +52,9 @@ public:
     VoxelChunk* get_chunk(Int2 pos);
 
     static VoxelID* get_chunk_voxel(VoxelChunk& chunk, Int3 pos);
+
+protected:
+    bool write_voxel(Int3 grid_pos, VoxelID id) override;
 
 private:
     Int2 size;

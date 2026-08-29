@@ -64,6 +64,35 @@ transforms the way any scene graph does (`src/voxel/VoxelGrid.cpp`):
 Three levels compose at draw time: model inside grid, grid inside its parents,
 parents in the world.
 
+### Grid Attachment
+
+Attaching (`VoxelGrid::attach_to`) is the hierarchy above plus a pair of voxels:
+the grid becomes a child of the anchor, and one voxel on each side is named as
+the connector that holds them together (`Attachment` in `VoxelGrid.hpp`). This is
+how a voxel vehicle is built - a wheel attached to a car moves with the car
+because it is a child of it, and spins on its own because its local transform is
+still its own.
+
+- Both connectors have to be solid voxels of their grid, and an anchor already
+  below the grid is refused, the same rule `set_parent()` follows.
+- The grid is snapped so the two connector voxels sit in the same place, leaving
+  its rotation and scale alone. Turning an attached grid rotates it about its own
+  origin and so carries the connector off the anchor: call `snap_to_anchor()`
+  again afterwards.
+- `set_voxel()` is no longer virtual. It refuses to clear a connector voxel while
+  the attachment stands, then hands the write to the grid's own `write_voxel()`.
+  Painting a connector another colour is still fine. `in_bounds()` is the bounds
+  check each grid implements, and `is_solid()` is built on it - `VoxelMap::get_voxel`
+  wraps an out of range coordinate rather than refusing it, so nothing may reach
+  it unchecked.
+- Only the child stores the attachment. What is attached *to* a grid is read off
+  its children, so the two can never disagree. `set_parent()` on an attached grid
+  drops the attachment rather than let the anchor and the parent differ.
+- `detach()` moves the grid up one step, to the anchor's own parent, and keeps it
+  standing where it was (`transform_relative_to()` in `main.cpp` redoes the local
+  transform against the new parent). Destroying an anchor does the same.
+- Not saved yet: a `.bgvox` file carries the tree, not the connector voxels.
+
 ### Grid Files (VoxelFile)
 
 `src/voxel/VoxelFile.cpp/hpp` saves and loads grids as `.bgvox` files: a

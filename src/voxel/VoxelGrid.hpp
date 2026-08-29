@@ -9,11 +9,13 @@
 #include <iosfwd>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 // #include "voxel/VoxelView.hpp"
 class VoxelView;
+class VoxelGrid;
 
 // REMINDER: Z goes UP/DOWN
 
@@ -61,6 +63,28 @@ struct ModelInfo {
     bool do_render;
     Model model;
     Transform transform;
+};
+
+/**
+ * How one grid is held onto another: the grid it hangs off, plus the voxel on
+ * each side that holds the two together.
+ *
+ * A wheel attached to a car is a grid whose connector is the voxel at the hub,
+ * held to the voxel on the car that is the end of the axle. The wheel moves
+ * with the car because it is a child of it, and turns on its own because its
+ * own local transform is still its to change.
+ *
+ * Neither connector voxel can be cleared while the attachment stands, see
+ * VoxelGrid::set_voxel.
+ */
+struct Attachment {
+    // The grid this one hangs off. Always the same as the parent, as
+    // attach_to() sets both, and detach() clears both.
+    VoxelGrid* anchor = nullptr;
+    // The connector voxel in the anchor's grid coordinates
+    Int3 anchor_voxel{};
+    // The connector voxel in the attached grid's own coordinates
+    Int3 local_voxel{};
 };
 
 class VoxelGrid {
@@ -131,6 +155,65 @@ public:
     /** Whether this grid is somewhere above `other` in the tree. */
     bool is_ancestor_of(const VoxelGrid* other) const;
 
+    // --- Attachment ---
+    // Attaching is the hierarchy plus a pair of voxels: it is how a grid is
+    // built onto another one rather than merely carried by it.
+
+    /**
+     * Holds this grid onto another one at a voxel on each side.
+     *
+     * The grid becomes a child of the anchor, so the anchor's transform is
+     * applied to it and not the other way round, and by default it is moved so
+     * that the two connector voxels sit in the same place. What it does with
+     * its own local transform afterwards is still its own business, which is
+     * how a wheel turns while the car it is attached to drives off.
+     *
+     * Both connectors have to be solid voxels that exist in their grid, and an
+     * anchor that is already below this grid is refused, as that would make
+     * get_world_transform() recurse forever. Attaching a grid that is already
+     * attached moves it to the new anchor.
+     *
+     * @param anchor: the grid to hang off.
+     * @param anchor_voxel: the connector, in the anchor's coordinates.
+     * @param local_voxel: the connector, in this grid's coordinates.
+     * @param snap: whether to move the grid so the connectors line up. Pass
+     *        false to keep the local transform exactly as it is.
+     * @return false when nothing was changed.
+     */
+    bool attach_to(VoxelGrid* anchor, Int3 anchor_voxel, Int3 local_voxel, bool snap = true);
+
+    /**
+     * Undoes attach_to(): the grid stops being a child of its anchor and takes
+     * the anchor's own parent instead, so it moves one step up the tree rather
+     * than out of it. It keeps the place it was in, and both connector voxels
+     * become ordinary voxels again.
+     * @return false when the grid was not attached.
+     */
+    bool detach();
+
+    bool is_attached() const { return attachment.has_value(); }
+
+    /** What this grid is attached to, or nullptr when it is not attached. */
+    const Attachment* get_attachment() const {
+        return attachment.has_value() ? &attachment.value() : nullptr;
+    }
+
+    /**
+     * Whether the voxel at this coordinate is holding an attachment together,
+     * either as this grid's own connector or as the anchor voxel of a grid
+     * attached to it. Those voxels cannot be cleared, see set_voxel().
+     */
+    bool is_connector_voxel(Int3 grid_pos) const;
+
+    /**
+     * Moves the grid so its connector voxel sits on the anchor's connector
+     * voxel, leaving its rotation and scale alone. attach_to() does this once;
+     * call it again after turning or scaling an attached grid, as a rotation
+     * about the grid's own origin carries the connector away from the anchor.
+     * @return false when the grid is not attached.
+     */
+    bool snap_to_anchor();
+
     /**
      * Writes everything about this grid that the file's header and common
      * section do not already carry, so its own size and its voxels.
@@ -144,9 +227,29 @@ public:
 
     /**
      * Writes a voxel and marks whatever has to be meshed again.
-     * Returns false when the position falls outside the grid.
+     *
+     * Clearing a connector voxel is refused while the attachment that needs it
+     * is still there, whether it is this grid's own connector or the one an
+     * attached grid is holding onto (see attach_to). Painting a connector a
+     * different colour is fine, only taking it away is not.
+     *
+     * Returns false when the position falls outside the grid, or when the
+     * write was refused.
      */
-    virtual bool set_voxel(Int3 grid_pos, VoxelID id) = 0;
+    bool set_voxel(Int3 grid_pos, VoxelID id);
+
+    /** Whether a coordinate is inside this grid at all. */
+    virtual bool in_bounds(Int3 grid_pos) const = 0;
+
+    /** Whether the grid holds anything other than air at this coordinate. */
+    bool is_solid(Int3 grid_pos);
+
+    /**
+     * The middle of a voxel in the grid's own space, which is the space a
+     * model is placed in. That space is the mesher's: X is grid x, Y is grid z
+     * (up) and Z is grid y, one unit per voxel.
+     */
+    static Vector3 voxel_centre_local(Int3 grid_pos);
 
     /**
      * Turns a point in the local space of one of this grid's models into the
@@ -165,6 +268,19 @@ protected:
     // Whatever this grid hangs off, and whatever hangs off it. Neither is owned.
     VoxelGrid* parent = nullptr;
     std::vector<VoxelGrid*> children;
+
+    // Set while this grid is attached to another one. The anchor in it is
+    // always the parent above; set_parent() drops the attachment rather than
+    // let the two disagree. A grid does not track what is attached *to* it:
+    // that is read off the children, so there is only ever one copy of it.
+    std::optional<Attachment> attachment;
+
+    /**
+     * set_voxel() once it has agreed to the write: the grid's own storage and
+     * whatever it has to mark for meshing again. Bounds are still this
+     * function's to check, as only the grid knows its own shape.
+     */
+    virtual bool write_voxel(Int3 grid_pos, VoxelID id) = 0;
 
     /** Drops a child from `children` without touching the child itself. */
     void forget_child(const VoxelGrid* child);

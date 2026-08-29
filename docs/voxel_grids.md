@@ -12,13 +12,22 @@ This is how voxel grids should be able to be modified:
 -[ ] be moved
   -[ ] translation
   -[ ] rotation
--[ ] be able to be attached to a different grid
+-[x] be able to be attached to a different grid
   - grid attachment is a hierarchical affair; as in the attached grid becomes a child of the other grid in the scene graph.  
   - when a grid is attached to another grid, a voxel from each grid is decided to be a connector voxel. Removal of this connector should not be allowed unless the grids get detached
   - the parent transform should apply to the child when calculating its position, but the child transform should not apply to the parent
   - the goal of this attachment system is to have voxel based vehicles that have parts that are part of different grids which move both with the vehicle but also on their own; imagine a car that has attached wheels on different grids, and the wheels spin as the car moves but also move with the car. 
--[ ] be able to be detached from parent grid
+  - `VoxelGrid::attach_to(anchor, anchor_voxel, local_voxel)`. Both connectors
+    have to be solid voxels, and an anchor already below the grid is refused.
+    The grid is snapped so the two connector voxels sit in the same place;
+    turning it afterwards and calling `snap_to_anchor()` again keeps it there,
+    which is what a spinning wheel does.
+-[x] be able to be detached from parent grid
   - should stop being a child of said parent and gain the same parent as their old parent (move up in the hierarchy) 
+  - `VoxelGrid::detach()`. The grid keeps the place it was standing in, and
+    both connector voxels become ordinary voxels again.
+  - Still to do: no UI for either, and an attachment is not written to a
+    `.bgvox` file yet, so a saved tree comes back parented but not attached.
 -[ ] be modified by runtime scripts/systems
   - more on this when we decide how to implement these
 

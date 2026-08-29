@@ -250,6 +250,32 @@ Transform transform_transform(const Transform &base, const Transform &applied) {
     return result;
 }
 
+Transform transform_relative_to(const Transform &world, const Transform &parent_world) {
+    Transform local;
+
+    // Each line undoes the matching one in transform_transform, in reverse
+    local.scale = Vector3{
+        parent_world.scale.x != 0.0f ? world.scale.x / parent_world.scale.x : 0.0f,
+        parent_world.scale.y != 0.0f ? world.scale.y / parent_world.scale.y : 0.0f,
+        parent_world.scale.z != 0.0f ? world.scale.z / parent_world.scale.z : 0.0f,
+    };
+
+    const Quaternion parent_inverse = QuaternionInvert(parent_world.rotation);
+    local.rotation = QuaternionMultiply(parent_inverse, world.rotation);
+
+    // Translate back, then turn back, then scale back: the reverse of the
+    // order transform_transform applies them in
+    const Vector3 moved = Vector3Subtract(world.translation, parent_world.translation);
+    const Vector3 turned = Vector3RotateByQuaternion(moved, parent_inverse);
+    local.translation = Vector3{
+        parent_world.scale.x != 0.0f ? turned.x / parent_world.scale.x : 0.0f,
+        parent_world.scale.y != 0.0f ? turned.y / parent_world.scale.y : 0.0f,
+        parent_world.scale.z != 0.0f ? turned.z / parent_world.scale.z : 0.0f,
+    };
+
+    return local;
+}
+
 Matrix transform_to_matrix(Transform t) {
     Matrix scale = MatrixScale(t.scale.x, t.scale.y, t.scale.z);
     Matrix rotation = QuaternionToMatrix(t.rotation);

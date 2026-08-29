@@ -65,12 +65,16 @@ void SingleChunkGrid::update_models() {
     }
 }
 
-bool SingleChunkGrid::set_voxel(const Int3 grid_pos, const VoxelID id) {
-    // get_voxel() does no bounds checking, so it is done here
-    if (grid_pos.x < 0 || grid_pos.x >= CHUNK_SIZE ||
-        grid_pos.y < 0 || grid_pos.y >= CHUNK_SIZE ||
-        grid_pos.z < 0 || grid_pos.z >= CHUNK_SIZE)
-        return false;
+bool SingleChunkGrid::in_bounds(const Int3 grid_pos) const {
+    // get_voxel() does no bounds checking of its own, so everything that
+    // reaches it goes through here first
+    return grid_pos.x >= 0 && grid_pos.x < CHUNK_SIZE &&
+           grid_pos.y >= 0 && grid_pos.y < CHUNK_SIZE &&
+           grid_pos.z >= 0 && grid_pos.z < CHUNK_SIZE;
+}
+
+bool SingleChunkGrid::write_voxel(const Int3 grid_pos, const VoxelID id) {
+    if (!in_bounds(grid_pos)) return false;
 
     *get_voxel(grid_pos) = id;
     was_updated = true;

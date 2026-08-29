@@ -24,7 +24,7 @@ public:
     VoxelID *get_voxel(Int3 grid_pos) override;
     void update_models() override;
     std::vector<ModelInfo*> get_models() override;
-    bool set_voxel(Int3 grid_pos, VoxelID id) override;
+    bool in_bounds(Int3 grid_pos) const override;
     bool model_to_grid(const ModelInfo* model, Vector3 local_pos, Int3* out) override;
 
     /**
@@ -35,6 +35,8 @@ public:
 
     /** Builds a SingleChunkGrid from the body written by write_body(). */
     static VoxelGrid* load_body(std::istream& in, const voxel_file::LoadContext& ctx);
+protected:
+    bool write_voxel(Int3 grid_pos, VoxelID id) override;
 private:
     Int2 size;
     std::optional<ModelInfo> model;

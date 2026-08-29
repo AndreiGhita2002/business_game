@@ -84,6 +84,13 @@ VoxelGrid* find_grid_on_ray(Ray ray, const std::vector<VoxelGrid*>* voxel_grids,
 
 Transform transform_transform(const Transform& base, const Transform& applied);
 
+/**
+ * The other way round from transform_transform(): the local transform that,
+ * applied under `parent_world`, lands on `world`. What a grid's local
+ * transform has to become for it to stay where it is while changing parents.
+ */
+Transform transform_relative_to(const Transform& world, const Transform& parent_world);
+
 Matrix transform_to_matrix(Transform t);
 
 void print_matrix(const Matrix& mat);
