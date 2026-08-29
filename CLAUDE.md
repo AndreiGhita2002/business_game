@@ -8,6 +8,26 @@ Business Game is a work-in-progress tycoon game inspired by OpenTTD, built with 
 
 ## Build Commands
 
+There is a `Makefile` at the root wrapping CMake, so the usual things are one
+word. It only drives CMake; the real makefiles are the generated ones in `build/`.
+
+```bash
+make            # configure, build and run the game
+make tests      # build and run every unit test
+make build      # build the game without running it
+make clean      # delete the build directory
+make help       # the rest
+
+make tests CTESTFLAGS="-R attach"   # only the tests whose name matches
+```
+
+`make run` starts the game from inside `build/`, not from `build/bin/`. That is
+deliberate: `main.cpp` loads its shaders from `"../resources/shaders/..."`, which
+only resolves to the repository's `resources/` when the working directory is one
+level below the repository root.
+
+The same thing by hand:
+
 ```bash
 # Build the project
 mkdir build && cd build
@@ -18,7 +38,7 @@ cmake --build .
 build/bin/business_game
 
 # Run the unit tests
-cd build && ctest --output-on-failure
+ctest --test-dir build --output-on-failure
 # or the binary directly, which takes Catch2's own flags:
 build/bin/business_game_tests "[voxelfile]"
 ```
