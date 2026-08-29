@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <raymath.h>
 
-#include "game/main.hpp"
+#include "game/Transform.hpp"
 
 VoxelGrid::~VoxelGrid() {
     // The children outlive their parent, so each keeps the place it was in

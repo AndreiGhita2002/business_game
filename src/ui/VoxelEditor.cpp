@@ -9,7 +9,7 @@
 #include <rlgl.h>
 
 #include "UIView.hpp"
-#include "game/main.hpp"
+#include "game/Picking.hpp"
 #include "voxel/VoxelView.hpp"
 
 // ---------------------------------------------------------------- palette cell

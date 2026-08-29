@@ -16,9 +16,43 @@ cmake --build .
 
 # Executable location
 build/bin/business_game
+
+# Run the unit tests
+cd build && ctest --output-on-failure
+# or the binary directly, which takes Catch2's own flags:
+build/bin/business_game_tests "[voxelfile]"
 ```
 
-The project uses CMake with FetchContent for dependencies (raylib, raylib-cpp, raygui). No test framework is configured.
+The project uses CMake with FetchContent for dependencies (raylib, raylib-cpp,
+raygui, Catch2).
+
+There are three targets. `business_game_lib` holds everything except `main()`,
+`business_game` is `main.cpp` linked against it, and `business_game_tests` is the
+Catch2 runner linked against the same library. **A new source file goes in the
+library's list, not the executable's** - the executable is only `main.cpp`.
+
+Pass `-DBUSINESS_GAME_BUILD_TESTS=OFF` to skip building Catch2, which is off
+automatically for a web build.
+
+## Tests
+
+Catch2 v3 (`src/tests/`), one file per area. They run without a window, which is
+what limits what they can cover:
+
+- `test_transform.cpp` - the maths in `game/Transform.hpp`.
+- `test_attachment.cpp` - the grid hierarchy and the attachment system.
+- `test_voxel_file.cpp` - the `.bgvox` chunk encoding, scalars and whole files.
+- `TestHelpers.hpp` - a palette, a self-deleting temp directory, and the
+  `REQUIRE_VEC3_EQ` / `REQUIRE_QUAT_EQ` / `REQUIRE_TRANSFORM_EQ` comparisons.
+  Include it **first** in a test file: `raymath.h` redefines raylib's vector
+  types unless `raylib.h` is in ahead of it, and this header gets that order
+  right.
+
+Grids in tests are built with a null `VoxelView`. That is only safe because
+`update_models()` is the one thing that dereferences it, and it is also the only
+call that needs an OpenGL context, so **tests must never call `update_models()`**.
+Anything that meshes, draws or reads input is out of reach and is not covered:
+`VoxelMesher`, `VoxelView`, `Light`, and all of `src/ui`.
 
 ## Architecture
 
@@ -89,7 +123,7 @@ still its own.
   its children, so the two can never disagree. `set_parent()` on an attached grid
   drops the attachment rather than let the anchor and the parent differ.
 - `detach()` moves the grid up one step, to the anchor's own parent, and keeps it
-  standing where it was (`transform_relative_to()` in `main.cpp` redoes the local
+  standing where it was (`transform_relative_to()` in `game/Transform.cpp` redoes the local
   transform against the new parent). Destroying an anchor does the same.
 - Saved with the grid: the connector voxels go in its header block in a
   `.bgvox` file, see Grid Files below.
@@ -254,7 +288,8 @@ of hit-testing and `mouse_consumed`. Do not convert the framework wholesale.
 
 ### Picking
 
-`voxel_model_matrix()` (`main.cpp`) builds the matrix a voxel model is drawn
+`voxel_model_matrix()` (`src/game/Picking.cpp`) builds the matrix a voxel model
+is drawn
 with. Both `VoxelView::drawVoxelModel` and `find_voxel_on_ray` go through it, so
 what is on screen and what a click hits cannot drift apart. `find_voxel_on_ray`
 returns the grid, the ModelInfo, the world space collision and that matrix;
@@ -266,6 +301,13 @@ grid z (up), Z is grid y.
 ### Entry Point
 
 `src/game/main.cpp` - Initializes 1600x900 window, sets up shader pipeline, runs 60 FPS main loop. Supports Emscripten/WebAssembly compilation. `mainLoop()` owns the frame's single `BeginDrawing()`/`EndDrawing()` block, so views draw in tree order (3D first, UI on top) - individual ViewNodes must never open their own drawing block.
+
+It holds `main()`, the `global::` state and the shader loading, and nothing else:
+it is the only file outside `business_game_lib`, so anything the rest of the code
+has to call cannot live here. The transform maths is in `src/game/Transform.cpp`
+and the ray casts in `src/game/Picking.cpp` for that reason. `main.hpp` still
+includes both, so an existing include of it keeps working, but new code should
+take the narrow header instead of dragging in the window and the view tree.
 
 ## Working Guidelines
 
@@ -295,3 +337,9 @@ grid z (up), Z is grid y.
   them (noted in `VoxelMesher.cpp`).
 - Greedy meshing optimization not yet implemented
 - VoxelGrid model vector recreated on every call (VoxelGrid.hpp:71)
+- `apply_transform_rot()` composes two rotations with `QuaternionAdd`, where
+  composing is `QuaternionMultiply` - what `transform_transform()` correctly
+  uses. Two quarter turns come out as something that is not a half turn and is
+  not even a unit quaternion. Only `apply_transform()` calls it and nothing calls
+  that, so nothing is visibly wrong today. Pinned as it stands by a test in
+  `test_transform.cpp`, which is the one to update if it is fixed.

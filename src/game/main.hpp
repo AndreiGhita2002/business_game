@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "ViewNode.hpp"
+#include "game/Picking.hpp"
+#include "game/Transform.hpp"
 #include "ui/VoxelEditor.hpp"
 #include "voxel/VoxelView.hpp"
 #include "voxel/VoxelMap.hpp"
@@ -32,67 +34,9 @@ namespace global {
     raylib::Shader loadAndPatchShader(const std::string& shader_path, int light_count);
 }
 
-void apply_transform(Vector3* position, Quaternion* rotation, Vector3* scale, const Transform& t);
-
-Vector3 apply_transform_trans(Vector3 v, const Transform &t);
-
-Quaternion apply_transform_rot(Quaternion rot, const Transform &t);
-
-Vector3 apply_transform_scale(Vector3 scale, const Transform &t);
-
-/**
- * Everything the editor needs about a voxel that a ray landed on.
- */
-struct VoxelRayHit {
-    VoxelGrid* grid;
-    ModelInfo* model;
-    // Point and normal in world space
-    RayCollision collision;
-    // The matrix the model was drawn with, for going back into model space
-    Matrix world_matrix;
-};
-
-/**
- * The matrix a voxel model is drawn with: the model's place inside its grid,
- * then the grid's place in the world (VoxelGrid::get_world_transform, so every
- * parent grid is folded in).
- * Both the renderer and the ray casts go through this, so that what is on the
- * screen and what a click hits can never drift apart.
- */
-Matrix voxel_model_matrix(const VoxelGrid* grid, const ModelInfo& model_info);
-
-/**
- * Does a ray cast and returns the closest voxel model on the line.
- *
- * @param ray: the ray, for mouse ray get it from `GetScreenToWorldRay`
- * @param voxel_grids: a collection of grids that the function should look through.
- * @param grid_type: only select grids of this type. If null, then return any grid.
- * @param out: filled in with the closest hit, untouched when nothing was hit.
- * @return whether anything was hit.
- */
-bool find_voxel_on_ray(Ray ray, const std::vector<VoxelGrid*>* voxel_grids, const char* grid_type, VoxelRayHit* out);
-
-/**
- * Does a ray cast and selects the first grid on the line.
- *
- * @param ray: the ray, for mouse ray get it from `GetScreenToWorldRay`
- * @param voxel_grids: a collection of grids that the function should look through.
- * @param grid_type: only select grids of this type. If null, then return any grid.
- * @return The first grid that was found on the ray.
- */
-VoxelGrid* find_grid_on_ray(Ray ray, const std::vector<VoxelGrid*>* voxel_grids, const char* grid_type);
-
-Transform transform_transform(const Transform& base, const Transform& applied);
-
-/**
- * The other way round from transform_transform(): the local transform that,
- * applied under `parent_world`, lands on `world`. What a grid's local
- * transform has to become for it to stay where it is while changing parents.
- */
-Transform transform_relative_to(const Transform& world, const Transform& parent_world);
-
-Matrix transform_to_matrix(Transform t);
-
-void print_matrix(const Matrix& mat);
+// The transform maths lives in game/Transform.hpp and the ray casts in
+// game/Picking.hpp, both included above so that everything that used to reach
+// them through this header still can. Include the narrow one directly in new
+// code: this header drags in the window, the shaders and the whole view tree.
 
 #endif //BUSINESS_GAME_MAIN_HPP

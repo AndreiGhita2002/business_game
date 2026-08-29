@@ -10,7 +10,7 @@
 #include <ostream>
 
 #include "VoxelMesher.hpp"
-#include "game/main.hpp"
+#include "voxel/VoxelView.hpp"
 
 SingleChunkGrid::SingleChunkGrid(VoxelView* view, const VoxelColourMap &voxel_colours)
     : VoxelGrid(view)

@@ -37,6 +37,8 @@
 
 # cmake build folder
 cmake-build-debug
+# the one the build instructions in CLAUDE.md tell you to make
+build/
 
 # claude worktrees
 /.claude/worktrees/
