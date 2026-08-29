@@ -8,6 +8,7 @@
 #include <iosfwd>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "voxel/VoxelGrid.hpp"
 
@@ -16,28 +17,58 @@ class VoxelView;
 /**
  * On disk format for voxel grids.
  *
- * A file is a readable header followed by a binary blob:
+ * A file holds one grid and everything hanging off it, flattened: the magic and
+ * how many grids there are, then every grid's readable header, then every grid's
+ * binary body in the same order.
  *
- *   BGVOX 1                      <- magic and format version, always line one
- *   name: my grid
- *   description: whatever this grid is
- *   type: VoxelMap               <- picks the loader, see load_grid()
+ *   BGVOX 3                      <- magic and format version, always line one
+ *   grid_count: 2
  *   voxel_bytes: 1
  *   chunk_size: 16
+ *
+ *   --- GRID ---                 <- one block per grid, in the order below
+ *   id: 0
+ *   type: VoxelMap               <- picks the loader, see load_grid()
+ *   name: my map
+ *   description: the world
+ *   parent: none
+ *   children: 1
  *   palette_size: 12
+ *
+ *   --- GRID ---
+ *   id: 1
+ *   type: SingleChunkGrid
+ *   name: crate
+ *   description: sits on the map
+ *   parent: 0
+ *   children:
+ *   palette_source: parent       <- meshed with the parent's colours, so its
+ *   palette_size: 0                 body carries no palette of its own
+ *
  *   --- BINARY ---               <- everything past this line's newline is binary
- *   <common section>
- *   <grid specific body>
+ *   <body><body>
  *
- * Header lines are "key: value", in any order after the magic. Blank lines and
- * lines starting with '#' are ignored, unknown keys are kept in Header::fields
- * so an older reader does not lose them.
+ * Header lines are "key: value", in any order inside their block. Blank lines
+ * and lines starting with '#' are ignored, unknown keys are kept in `fields` so
+ * an older reader does not lose them.
  *
- * The common section is written for every grid type, in this order:
- *   u32 palette_size, then that many { u8 id, u8 r, u8 g, u8 b, u8 a }
- *   f32 x10: translation xyz, rotation xyzw, scale xyz
+ * The ids mean nothing outside the file: the writer numbers the grids from 0 as
+ * it walks the tree. `parent` and `children` point at those numbers and are
+ * what the tree is put back together from, so the bodies carry no structure at
+ * all.
  *
- * The body after it is up to each grid (VoxelGrid::write_body), but the voxels
+ *   <body>      := u32 id, u32 payload_bytes, <payload>
+ *   <payload>   := [<palette>] <transform> <grid body>
+ *   <palette>   := u32 count, then that many { u8 id, u8 r, u8 g, u8 b, u8 a }
+ *                  left out when the header says palette_source: parent
+ *   <transform> := f32 x10: translation xyz, rotation xyzw, scale xyz. Local,
+ *                  so relative to the parent grid.
+ *
+ * Each body naming its own id, and carrying its own length, is what lets the
+ * loader cope with bodies that are not in header order: they are indexed first
+ * and then read by id. That should never happen, and is logged when it does.
+ *
+ * The grid body is up to each grid (VoxelGrid::write_body), but the voxels
  * inside it always go through write_chunk()/read_chunk(), so every grid stores
  * voxels the same way no matter how it lays out the rest.
  *
@@ -48,11 +79,43 @@ namespace voxel_file {
 
 // First line of every file: MAGIC, a space, then the format version.
 inline constexpr char MAGIC[] = "BGVOX";
-inline constexpr int FORMAT_VERSION = 1;
-// The line that closes the readable header.
+inline constexpr int FORMAT_VERSION = 3;
+// Opens each grid's header block.
+inline constexpr char GRID_MARKER[] = "--- GRID ---";
+// The line that closes the readable part of the file.
 inline constexpr char BINARY_MARKER[] = "--- BINARY ---";
 // The extension these files are expected to carry.
 inline constexpr char FILE_EXTENSION[] = ".bgvox";
+
+/** One grid's readable header block. */
+struct GridHeader {
+    // Only means anything inside the file it came from.
+    uint32_t id = 0;
+    std::string grid_type;
+    std::string name;
+    std::string description;
+
+    // The id of the grid this one hangs off. A file has one grid with no
+    // parent, and that is the one load_grid() returns.
+    bool has_parent = false;
+    uint32_t parent_id = 0;
+    // The ids of the grids hanging off this one. Says the same as the parent
+    // fields the other way round, and either one is enough to rebuild the tree.
+    std::vector<uint32_t> children;
+
+    // Whether the grid shares its parent's colour map, in which case its body
+    // carries no palette.
+    bool palette_from_parent = false;
+
+    // Every "key: value" line of the block, including the ones mirrored above
+    // and any key this build does not know about.
+    std::map<std::string, std::string> fields;
+
+    /** The value of a key, or nullptr when the block did not carry it. */
+    const std::string* find(const std::string& key) const;
+    /** The value of a key as an int, or fallback when missing or unparsable. */
+    int get_int(const std::string& key, int fallback) const;
+};
 
 /**
  * The readable part of a file. Cheap to read on its own, so a file browser can
@@ -60,17 +123,25 @@ inline constexpr char FILE_EXTENSION[] = ".bgvox";
  */
 struct Header {
     int version = FORMAT_VERSION;
+    // The keys before the first grid block, so the ones about the file itself.
+    std::map<std::string, std::string> fields;
+    // In the order they appear in the file, which is the order the bodies are
+    // meant to be in.
+    std::vector<GridHeader> grids;
+
+    // The root grid's name, description and type, copied out for listing files
+    // without having to go looking for the root.
     std::string name;
     std::string description;
     std::string grid_type;
-    // Every "key: value" line, including the ones mirrored in the members
-    // above. Grid specific loaders read their own keys from here.
-    std::map<std::string, std::string> fields;
 
-    /** The value of a header key, or nullptr when the file did not carry it. */
     const std::string* find(const std::string& key) const;
-    /** The value of a header key as an int, or fallback when missing or unparsable. */
     int get_int(const std::string& key, int fallback) const;
+
+    /** The first grid with no parent, or nullptr when the file holds none. */
+    const GridHeader* root() const;
+    /** The block with this id, or nullptr. */
+    const GridHeader* find_grid(uint32_t id) const;
 };
 
 /**
@@ -79,19 +150,22 @@ struct Header {
  */
 struct LoadContext {
     VoxelView* view;
-    const Header* header;
-    // The palette read from the file, or the shared one the caller asked for.
+    // The whole file's readable part, and this grid's own block of it.
+    const Header* file;
+    const GridHeader* header;
+    // The palette from this grid's body, the parent's when it shares one, or
+    // the shared one the caller asked for.
     VoxelColourMap palette;
     // The grid's local transform, applied by load_grid() once the loader has
-    // returned. A loaded grid has no parent, so this is also where it lands in
-    // the world until something calls set_parent() on it.
+    // returned.
     Transform transform;
 };
 
 /**
  * Builds a grid from the body of a file. The stream is positioned at the first
- * byte after the common section. Returns nullptr on a malformed body, and
- * ownership of the grid passes to the caller otherwise.
+ * byte of the grid's own body, after the palette and transform in front of it.
+ * Returns nullptr on a malformed body, and ownership of the grid passes to the
+ * caller otherwise.
  */
 using GridLoader = VoxelGrid* (*)(std::istream& in, const LoadContext& ctx);
 
@@ -107,6 +181,11 @@ bool can_load_grid_type(const std::string& grid_type);
 
 /**
  * Writes a grid to a file, creating parent directories as needed.
+ *
+ * Everything hanging off the grid goes in with it, to any depth. The grids are
+ * numbered from 0 as the tree is walked, headers are written in that order and
+ * the bodies follow in the same order.
+ *
  * The name and description are stored on the grid as well, so a later save
  * without them keeps what was used here.
  * Returns false and logs on any failure.
@@ -117,24 +196,44 @@ bool save_grid(VoxelGrid* grid, const std::string& path,
 /** Saves using the name and description the grid already carries. */
 bool save_grid(VoxelGrid* grid, const std::string& path);
 
-/** Reads only the readable header of a file. */
+/** Reads only the readable part of a file, so every grid's header. */
 bool read_header(const std::string& path, Header* out);
 
 /**
- * Reads the header, then hands the rest of the file to the loader registered
- * for the grid type named in it.
+ * Reads the headers, builds a grid per body through the loader registered for
+ * its type, and hangs them off each other as the parent and children fields
+ * say, so the whole tree comes back in the shape it was saved in.
+ *
+ * Nothing is added to a VoxelView by this: the grids still have to be put in
+ * VoxelView::voxel_grids to be updated and drawn, children included, which is
+ * what collect_grids() is for.
  *
  * @param path: the file to read.
- * @param view: the view the new grid is drawn by.
- * @param shared_palette: when set, the new grid uses this palette and the one
- *        in the file is dropped. Pass the scene's palette to keep every grid
- *        on the same colours, or nullptr to use the file's own.
- * @param out_header: filled in with the header when not null.
- * @return the new grid, owned by the caller, or nullptr on any failure.
+ * @param view: the view the new grids are drawn by.
+ * @param shared_palette: when set, every grid in the file uses this palette and
+ *        the ones in the file are dropped. Pass the scene's palette to keep
+ *        everything on the same colours, or nullptr to use the file's own.
+ * @param out_header: filled in with the headers when not null.
+ * @return the root grid, owned by the caller, or nullptr on any failure. A
+ *         failure part way through leaves nothing behind.
  */
 VoxelGrid* load_grid(const std::string& path, VoxelView* view,
                      VoxelColourMap shared_palette = nullptr,
                      Header* out_header = nullptr);
+
+/**
+ * Appends `root` and everything below it to `out`, parents before children.
+ * The order the grids are numbered and written in, and the usual way to hand a
+ * freshly loaded tree to a VoxelView.
+ */
+void collect_grids(VoxelGrid* root, std::vector<VoxelGrid*>* out);
+
+/**
+ * Deletes a grid and everything below it, children first. The hierarchy links
+ * do not own anything, so deleting the root on its own would leave the children
+ * behind as roots of their own.
+ */
+void delete_grid_tree(VoxelGrid* root);
 
 // --- The voxel format, shared by every grid ---
 
