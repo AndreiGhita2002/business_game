@@ -20,6 +20,7 @@
 #include "ui/UIButton.hpp"
 #include "ui/UIImage.hpp"
 #include "ui/ShaderMenu.hpp"
+#include "ui/GridTransformMenu.hpp"
 
 #if defined(PLATFORM_WEB)
     #include <emscripten/emscripten.h>
@@ -35,6 +36,11 @@ constexpr float UI_BUTTON_GAP = 8.0f;
 void global::init() {
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
     raylib::Window::Init(1600, 900, "business game");
+
+    // Escape is a tool's "give up on this selection" key - the attachment menu
+    // and the grid transform menu both offer it - so it cannot also be the one
+    // that closes the window. The window button is the way out now.
+    SetExitKey(KEY_NULL);
 
     root_view = std::make_unique<ViewNode>(nullptr);
 
@@ -116,9 +122,31 @@ void global::init() {
         voxel_view->move_camera_light = !voxel_view->move_camera_light;
     });
 
+    // Moving and turning a grid, on the right edge. Its rows and its attachment
+    // buttons only appear once a grid has been picked out of the world: the
+    // grid selected there is the one that gets moved, and the one that gets
+    // attached to something else.
+    auto transform_menu_node = std::make_unique<GridTransformMenu>(ui_view, voxel_view);
+    auto transform_menu = transform_menu_node.get();
+    ui_view->add_child(std::move(transform_menu_node));
+
     // The voxel editor is a UI panel now, so it lives under the UIView. It is
     // added last, which puts it on top of the elements before it.
-    ui_view->add_child(std::make_unique<VoxelEditor>(ui_view, voxel_view));
+    auto editor_node = std::make_unique<VoxelEditor>(ui_view, voxel_view);
+    auto editor = editor_node.get();
+    ui_view->add_child(std::move(editor_node));
+
+    // Both act on a click in the world, so only one of them may be armed at a
+    // time: otherwise a single click would be read as a voxel to place and as a
+    // grid to pick at once. Each switches the other off as it is armed, which
+    // is what these hooks are for - neither knows the other exists, and this is
+    // the one place they meet.
+    transform_menu->on_activate = [editor] {
+        editor->select(NO_VOXEL_SELECTION);
+    };
+    editor->on_select = [transform_menu] {
+        transform_menu->cancel();
+    };
 
     TraceLog(LOG_DEBUG, "main init finished!");
 }

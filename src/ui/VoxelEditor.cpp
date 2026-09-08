@@ -71,6 +71,12 @@ VoxelEditor::VoxelEditor(ViewNode* parent, VoxelView* voxel_view)
 }
 
 void VoxelEditor::select(const int voxel_id) {
+    // Only arming is worth telling anyone about. Clearing the selection is
+    // exactly what the other tools do to this one as they are armed, so
+    // reporting that as well would send the news straight back where it came
+    // from.
+    if (voxel_id != NO_VOXEL_SELECTION && on_select) on_select();
+
     selected_id = voxel_id;
     TraceLog(LOG_DEBUG, "[EDITOR] Selected voxel id: %d", voxel_id);
 }

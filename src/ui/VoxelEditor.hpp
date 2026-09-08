@@ -5,6 +5,8 @@
 #ifndef BUSINESS_GAME_VOXELEDITOR_HPP
 #define BUSINESS_GAME_VOXELEDITOR_HPP
 
+#include <functional>
+
 #include "ui/UINode.hpp"
 #include "voxel/VoxelGrid.hpp"
 
@@ -61,6 +63,17 @@ class VoxelEditor final : public UINode {
 public:
     // The voxel id placed on click, or NO_VOXEL_SELECTION
     int selected_id;
+
+    /**
+     * Run when a colour is armed, so that the other tools that act on a world
+     * click (the attachment menu, the grid transform menu) can be switched off
+     * first. Set by whoever builds the UI; the editor never assumes anything
+     * about what is on the other end of it.
+     *
+     * Not run when the selection is cleared, as that is what those tools do to
+     * this one when they are armed themselves.
+     */
+    std::function<void()> on_select;
 
     std::string& get_view_type() override;
 

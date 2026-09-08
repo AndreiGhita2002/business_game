@@ -69,6 +69,10 @@ add_library(business_game_lib STATIC
         src/game/Transform.hpp
         src/game/ViewNode.hpp
         src/game/main.hpp
+        src/ui/AttachMenu.cpp
+        src/ui/AttachMenu.hpp
+        src/ui/GridTransformMenu.cpp
+        src/ui/GridTransformMenu.hpp
         src/ui/ShaderMenu.cpp
         src/ui/ShaderMenu.hpp
         src/ui/UIButton.cpp
@@ -81,6 +85,7 @@ add_library(business_game_lib STATIC
         src/ui/UINode.hpp
         src/ui/UINumberRow.cpp
         src/ui/UINumberRow.hpp
+        src/ui/UIPrompt.hpp
         src/ui/UIStyle.hpp
         src/ui/UIView.cpp
         src/ui/UIView.hpp
