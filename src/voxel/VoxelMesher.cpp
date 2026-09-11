@@ -15,12 +15,12 @@
 
 
 // Helper: linear index for (x,y,z_map) in chunk
-inline int idx(int x, int y, int z) {
+static int idx(int x, int y, int z) {
     return x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE;
 }
 
 // Helper: is inside current chunk
-inline bool inChunk(int x, int y, int z) {
+static bool inChunk(int x, int y, int z) {
     return (0 <= x && x < CHUNK_SIZE) &&
            (0 <= y && y < CHUNK_SIZE) &&
            (0 <= z && z < CHUNK_SIZE);
@@ -50,19 +50,19 @@ build_chunk_mesh(const VoxelChunk& chunk, Vector3 origin, float voxelSize) {
     };
 
     // Four CCW corners per face in MAP space (relative to voxel min corner)
-    const std::array<std::array<Vector3,4>, 6> faceCornersMap = {
+    constexpr std::array faceCornersMap = {
         // +X
-        std::array<Vector3,4>{ Vector3{1,0,0}, Vector3{1,0,1}, Vector3{1,1,1}, Vector3{1,1,0} },
+        std::array{ Vector3{1,0,0}, Vector3{1,0,1}, Vector3{1,1,1}, Vector3{1,1,0} },
         // -X
-        std::array<Vector3,4>{ Vector3{0,0,0}, Vector3{0,1,0}, Vector3{0,1,1}, Vector3{0,0,1} },
+        std::array{ Vector3{0,0,0}, Vector3{0,1,0}, Vector3{0,1,1}, Vector3{0,0,1} },
         // +Y (map)
-        std::array<Vector3,4>{ Vector3{0,1,0}, Vector3{1,1,0}, Vector3{1,1,1}, Vector3{0,1,1} },
+        std::array{ Vector3{0,1,0}, Vector3{1,1,0}, Vector3{1,1,1}, Vector3{0,1,1} },
         // -Y (map)
-        std::array<Vector3,4>{ Vector3{0,0,0}, Vector3{0,0,1}, Vector3{1,0,1}, Vector3{1,0,0} },
+        std::array{ Vector3{0,0,0}, Vector3{0,0,1}, Vector3{1,0,1}, Vector3{1,0,0} },
         // +Z (up)
-        std::array<Vector3,4>{ Vector3{0,0,1}, Vector3{0,1,1}, Vector3{1,1,1}, Vector3{1,0,1} },
+        std::array{ Vector3{0,0,1}, Vector3{0,1,1}, Vector3{1,1,1}, Vector3{1,0,1} },
         // -Z (down)
-        std::array<Vector3,4>{ Vector3{0,0,0}, Vector3{1,0,0}, Vector3{1,1,0}, Vector3{0,1,0} }
+        std::array{ Vector3{0,0,0}, Vector3{1,0,0}, Vector3{1,1,0}, Vector3{0,1,0} }
     };
 
     const float faceUV[8] = { 0,0,  1,0,  1,1,  0,1 };
