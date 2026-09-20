@@ -143,7 +143,19 @@ void global::init() {
 }
 
 void global::shutdown() {
+    // The shader is freed here, while the window and its GL context are still
+    // up, and then emptied out by hand.
+    //
+    // Both halves matter. UnloadShader() takes the shader by value, so it frees
+    // shader.locs without the copy out here ever hearing about it, and
+    // raylib::Shader's destructor unloads again at exit on the strength of
+    // locs still not being null - after the window is gone, and on a pointer
+    // that was freed the first time round. That was the double free on
+    // shutdown. raylib::Shader::Unload() is no use either: it tests the same
+    // stale locs and leaves it just as stale.
     UnloadShader(voxel_shader);
+    voxel_shader.locs = nullptr;
+    voxel_shader.id = 0;
 
     // The view tree is torn down before the window, so that anything it holds
     // on the GPU (UI textures, meshes) is released while the context is alive.

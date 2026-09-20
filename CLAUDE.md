@@ -372,6 +372,14 @@ grid z (up), Z is grid y.
 
 `src/game/main.cpp` - Initializes 1600x900 window, sets up shader pipeline, runs 60 FPS main loop. Supports Emscripten/WebAssembly compilation. `mainLoop()` owns the frame's single `BeginDrawing()`/`EndDrawing()` block, so views draw in tree order (3D first, UI on top) - individual ViewNodes must never open their own drawing block.
 
+`global::shutdown()` unloads the voxel shader and then clears its `locs` and
+`id` by hand. `raylib::Shader` is an owning wrapper whose destructor unloads
+again at static destruction - after the window is closed - unless `locs` is
+null, and the free `UnloadShader()` takes its argument by value, so it cannot
+null it for you. Without that clearing the program aborts on exit with a double
+free. The same trap waits for any other raylib-cpp owning wrapper that is also
+unloaded by hand.
+
 It holds `main()`, the `global::` state and the shader loading, and nothing else:
 it is the only file outside `business_game_lib`, so anything the rest of the code
 has to call cannot live here. The transform maths is in `src/game/Transform.cpp`
