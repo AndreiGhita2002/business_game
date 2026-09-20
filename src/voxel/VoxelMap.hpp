@@ -11,6 +11,8 @@
 #include "voxel/VoxelFile.hpp"
 #include "voxel/VoxelGrid.hpp"
 
+class VoxelVolume;
+
 #define VOXEL_MAP_STR "VoxelMap"
 
 class VoxelMap final : public VoxelGrid {
@@ -18,6 +20,10 @@ class VoxelMap final : public VoxelGrid {
 public:
     std::map<Int2, VoxelChunk> chunks;
     std::map<Int2, bool> chunk_was_updated;
+    // The same question for the shadow volume, which is a separate flag because
+    // the mesh and the volume are brought up to date by different calls and
+    // each clears its own.
+    std::map<Int2, bool> chunk_volume_dirty;
     std::map<Int2, ModelInfo> chunk_models;
 
     /**
@@ -47,6 +53,15 @@ public:
 
     /** Builds a VoxelMap from the body written by write_body(). */
     static VoxelGrid* load_body(std::istream& in, const voxel_file::LoadContext& ctx);
+
+    /**
+     * Writes every chunk that has changed since the last call into the volume
+     * the lighting shader traces its shadow rays through.
+     *
+     * The chunks go in at the same place they are meshed at, so what casts a
+     * shadow and what is drawn cannot drift apart.
+     */
+    void update_volume(VoxelVolume& volume);
 
     Int2 get_chunk_count() const;
     VoxelChunk* get_chunk(Int2 pos);

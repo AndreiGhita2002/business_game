@@ -62,6 +62,10 @@ what limits what they can cover:
 - `test_transform.cpp` - the maths in `game/Transform.hpp`.
 - `test_attachment.cpp` - the grid hierarchy and the attachment system.
 - `test_voxel_file.cpp` - the `.bgvox` chunk encoding, scalars and whole files.
+- `test_voxel_mesh.cpp` - `build_chunk_mesh_data()`: which faces come out, the
+  faces dropped against a neighbouring chunk, and the baked ambient occlusion.
+- `test_voxel_ray.cpp` - `voxel_ray_blocked()`, the voxel walk a shadow ray
+  does, which is the testable twin of the one in `lighting.fs`.
 - `TestHelpers.hpp` - a palette, a self-deleting temp directory, and the
   `REQUIRE_VEC3_EQ` / `REQUIRE_QUAT_EQ` / `REQUIRE_TRANSFORM_EQ` comparisons.
   Include it **first** in a test file: `raymath.h` redefines raylib's vector
@@ -91,7 +95,31 @@ The UI/scene uses a `ViewNode` tree hierarchy with recursive update/render trave
 - **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks), Perlin noise terrain generation
 - **SingleChunkGrid** (`src/voxel/SingleChunkGrid.cpp/hpp`) - Single chunk for the voxel editor
 
-**VoxelMesher** (`src/voxel/VoxelMesher.cpp/hpp`) converts voxel data to 3D meshes with per-material generation.
+**VoxelMesher** (`src/voxel/VoxelMesher.cpp/hpp`) converts voxel data to 3D
+meshes with per-material generation.
+
+- `build_chunk_mesh_data()` is the CPU half and needs no OpenGL context, which
+  is what lets the tests cover it. `upload_chunk_mesh()` is the half that does.
+  `build_chunk_mesh()` is still the two together.
+- It takes a `VoxelNeighbourSampler`, which answers what sits one voxel outside
+  the chunk. The chunk is copied into an 18x18x18 padded array first, so a
+  lookup across a border is an ordinary array read. A face against a solid
+  neighbour is left out whichever chunk that neighbour is in, and an empty
+  sampler means air outside (what a SingleChunkGrid wants).
+- **Per-vertex ambient occlusion** is baked into the vertex colours: each face
+  corner reads the three voxels around it in the air in front of the face
+  (`vertex_ao()`), and the quad is split along the darker diagonal so the shade
+  does not crease the wrong way. `AO_SHADE` is the brightness of the four
+  levels, so changing it means remeshing.
+- The colours are a shade, not a tint. `lighting.fs` reads `fragColor.r` as the
+  occlusion and no longer multiplies the vertex colour into the material.
+
+**VoxelVolume** (`src/voxel/VoxelVolume.cpp/hpp`) - The same voxels as a 3D
+texture, one byte each, for the lighting shader to trace shadow rays through.
+`VoxelMap::update_volume()` uploads the chunks that have changed, tracked by
+`chunk_volume_dirty` because the mesh and the volume are brought up to date by
+different calls. This is the one file that calls OpenGL directly: rlgl has no 3D
+textures.
 
 ### Grid Transforms
 
@@ -237,29 +265,49 @@ palette_size: 0                 its body
 
 ### Rendering Pipeline (VoxelView)
 
-Three-pass system in `src/voxel/VoxelView.cpp/hpp`:
-1. **Shadow Pass** - Render to shadow map for each light
-2. **Main Pass** - Render with lighting shader using shadow maps
-3. **UI Pass** - Overlay UI elements
+Two-pass system in `src/voxel/VoxelView.cpp/hpp`:
+1. **Main Pass** - Render with the lighting shader, which traces its own shadows
+2. **UI Pass** - Overlay UI elements
 
-Lighting system supports directional + point lights with 1024x1024 shadow maps. Shaders in `resources/shaders/` are patched at runtime for dynamic light count.
+Lighting supports directional + point lights. Shaders in `resources/shaders/`
+are patched at runtime for the light count, and nothing else.
 
-Shadow pass details worth knowing:
-- A light's `light_camera` is orthographic, and raylib reads `fovy` on an ortho
-  camera as the **height of the box in world units**, not an angle. That value is
-  the size of the region that gets shadows at all - fragments outside the light
-  frustum are drawn fully lit (`lighting.fs`), which looks like shadows simply
-  stopping partway across the scene.
-- The pass renders **back faces only** (`RL_CULL_FACE_FRONT`), so the depth in
-  the map is the far side of a solid and a surface cannot shadow itself. This
-  depends on the voxel meshes being closed.
-- It uses its own tight clip planes (`SHADOW_NEAR`/`SHADOW_FAR` in `Light.hpp`)
-  and restores raylib's defaults afterwards.
-- The shader's bias is counted in shadow map texels; `Light::update` sends
-  `shadowTexelDepth` per light, so changing a light's box needs no retuning.
-- `biasTexels`, `biasSlopeTexels` and `biasMaxSlope` are uniforms with no
-  defaults in the shader. ShaderMenu sends them when it is built, so the shader
-  needs a ShaderMenu (or an equivalent) to light anything correctly.
+**Shadows are traced, not mapped.** There is no shadow pass, no shadow map and
+no depth comparison, so none of the bias constants that used to be tuned exist
+any more:
+- The map's voxels are uploaded to a 3D texture (`VoxelVolume`), and
+  `lighting.fs` walks that grid from the fragment towards the light, one voxel
+  at a time, with Amanatides and Woo's traversal. The first solid voxel it meets
+  puts the fragment in shadow; running out of world leaves it lit.
+- The walk is mirrored in C++ as `voxel_ray_blocked()` in `game/Picking.cpp`,
+  which is what the unit tests cover, as a shader cannot be tested. **Change the
+  two together.**
+- A shadow ray starts a hundredth of a voxel along the surface normal, so it
+  begins in the air voxel in front of the face rather than on the boundary of
+  the solid one behind it. Voxel normals are exact, so this holds at any light
+  angle. It is the only constant the shadows have.
+- `SHADOW_MAX_STEPS` in the shader caps how far a ray travels. A ray that runs
+  out is called lit, which is why a very low sun is kept out of the shader
+  menu's range: the flatter the angle, the further a ray goes before it clears
+  the terrain.
+- A directional light is an elevation and an azimuth, with no position and no
+  camera of its own. `Light::get_direction()` turns the two into the direction
+  the light travels.
+- **Only the map is in the volume.** A grid with its own transform (a vehicle)
+  does not cast a shadow and does not shadow itself yet: that needs a volume per
+  grid, marched in the grid's own space.
+- The volume is bound to texture unit `WORLD_VOLUME_TEXTURE_UNIT` (12), above
+  the units raylib hands to a material's own maps as it draws.
+- ShaderMenu's `step view` row colours every fragment by how far its shadow ray
+  travelled, green for short and red for long. It is the tool for finding where
+  the rays are getting expensive.
+
+**Ambient occlusion is baked into the mesh**, not traced: the mesher writes it
+into the vertex colours (see VoxelMesher above) and the shader takes it off the
+ambient term in full, plus as much of the direct light as `aoDirectStrength`
+asks for. It is per grid, so a vehicle does not darken the ground it stands on -
+its sun shadow does that, and the soft contact patch would need either a
+per-pixel AO from the volumes or a blob under the vehicle.
 
 ### UI System
 
@@ -278,14 +326,16 @@ Hand-rolled retained-mode UI in `src/ui`:
   `float*` to a number owned elsewhere, plus its own step, so one row can drive a
   shader uniform, a light setting, or anything else in place.
 - **ShaderMenu** (`src/ui/ShaderMenu.cpp/hpp`) - Debug panel, top left, hidden
-  until F3 or its own button. One UINumberRow per tunable: the three shadow bias
-  uniforms, the ambient level, and each light's shadow box size. It owns the
-  starting values for the bias uniforms, which `lighting.fs` no longer defines
-  itself. `add_value_row()` hangs non-uniform values off the same panel.
+  until F3 or its own button. One UINumberRow per tunable: the ambient level,
+  how much ambient occlusion comes off direct light, and the shadow step view,
+  all shader uniforms it owns the starting values for.
+  `add_value_row()` hangs non-uniform values off the same panel, which is how
+  the sun's elevation and azimuth rows are added in `main.cpp`.
 
-Every light keybind (Y, U, I, O, P) is mirrored by a button in the bottom left
-or a row in the shader menu; both write the same state. The camera movement keys
-(WASD, Q/E, F/C) are held rather than toggled, so they have no buttons.
+The sun's keybind (U) is mirrored by a button in the bottom left, and its angle
+in the sky by the shader menu rows; both write the same light. The camera
+movement keys (WASD, Q/E, F/C) are held rather than toggled, so they have no
+buttons.
 - **VoxelEditor** (`src/ui/VoxelEditor.cpp/hpp`) - A UINode panel in the bottom
   right holding a table of `VoxelPaletteCell`s, one per colour in the grid's
   `voxel_colours` map plus a deselect cell. Pick a colour, then left click the
@@ -351,9 +401,6 @@ take the narrow header instead of dragging in the window and the view tree.
 
 ## Known Issues (from TODOs in code)
 
-- The mesher treats out-of-chunk neighbours as air, so every chunk emits a wall
-  of hidden faces along its borders. Stitching neighbouring chunks would drop
-  them (noted in `VoxelMesher.cpp`).
 - Greedy meshing optimization not yet implemented
 - VoxelGrid model vector recreated on every call (VoxelGrid.hpp:71)
 - `apply_transform_rot()` composes two rotations with `QuaternionAdd`, where

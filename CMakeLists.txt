@@ -103,6 +103,8 @@ add_library(business_game_lib STATIC
         src/voxel/VoxelMesher.hpp
         src/voxel/VoxelView.cpp
         src/voxel/VoxelView.hpp
+        src/voxel/VoxelVolume.cpp
+        src/voxel/VoxelVolume.hpp
 )
 
 # PUBLIC, so that both the game and the tests inherit them
@@ -170,6 +172,8 @@ if(BUSINESS_GAME_BUILD_TESTS)
             src/tests/test_attachment.cpp
             src/tests/test_transform.cpp
             src/tests/test_voxel_file.cpp
+            src/tests/test_voxel_mesh.cpp
+            src/tests/test_voxel_ray.cpp
     )
     target_link_libraries(business_game_tests PRIVATE
             business_game_lib

@@ -45,7 +45,9 @@ void SingleChunkGrid::update_models() {
 
     if (view->isInRenderDistance(world.translation)) {
         if (was_updated) {
-            auto meshes = build_chunk_mesh(data, Vector3{0.0,0.0,0.0}, 1.0f);
+            // No sampler: a single chunk grid has no neighbouring chunks, so
+            // everything outside it is air and every outward face is drawn.
+            auto meshes = build_chunk_mesh(data, {}, Vector3{0.0,0.0,0.0}, 1.0f);
             auto new_model = build_chunk_model(meshes, *voxel_colours);
 
             // The previous model would leak its GPU buffers otherwise, and the

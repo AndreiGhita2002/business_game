@@ -10,6 +10,7 @@
 #include <ostream>
 
 #include "voxel/VoxelMesher.hpp"
+#include "voxel/VoxelVolume.hpp"
 #include "game/main.hpp"
 
 VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y,
@@ -45,6 +46,7 @@ VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y
         for (int iy = 0; iy < chunk_count.y; ++iy) {
             chunks[Int2(ix, iy)] = VoxelChunk{};
             chunk_was_updated[Int2(ix, iy)] = true;
+            chunk_volume_dirty[Int2(ix, iy)] = true;
         }
     }
 
@@ -140,6 +142,7 @@ VoxelGrid* VoxelMap::load_body(std::istream& in, const voxel_file::LoadContext& 
             return nullptr;
         }
         map->chunk_was_updated[chunk_pos] = true;
+        map->chunk_volume_dirty[chunk_pos] = true;
     }
     return map;
 }
@@ -176,7 +179,25 @@ void VoxelMap::update_models() {
         }
 
         if (chunk_was_updated[chunk_pos]) {
-            auto meshes = build_chunk_mesh(*chunk, Vector3{0.0,0.0,0.0}, 1.0f);
+            // What sits just outside this chunk. The mesher reads it to leave
+            // out the faces between two chunks that meet, and to work out the
+            // ambient occlusion of a corner on the border. The coordinates are
+            // chunk local and reach one voxel past each edge; a map is one
+            // chunk tall, so z needs no offset.
+            const auto neighbour = [this, chunk_pos](const int x, const int y, const int z) -> VoxelID {
+                const Int3 grid_pos{
+                    chunk_pos.x * CHUNK_SIZE + x,
+                    chunk_pos.y * CHUNK_SIZE + y,
+                    z
+                };
+                // in_bounds first: get_voxel wraps an out of range coordinate
+                // into a chunk rather than refusing it
+                if (!in_bounds(grid_pos)) return 0;
+                const VoxelID* voxel = get_voxel(grid_pos);
+                return voxel != nullptr ? *voxel : 0;
+            };
+
+            auto meshes = build_chunk_mesh(*chunk, neighbour, Vector3{0.0,0.0,0.0}, 1.0f);
             auto new_model = build_chunk_model(meshes, *voxel_colours);
 
             // A chunk that is meshed again already holds a model, which would
@@ -188,6 +209,26 @@ void VoxelMap::update_models() {
             chunk_models[chunk_pos] = ModelInfo{true, new_model, model_transform};
             chunk_was_updated[chunk_pos] = false;
         }
+    }
+}
+
+void VoxelMap::update_volume(VoxelVolume& volume) {
+    if (!volume.is_created()) return;
+
+    for (auto& [chunk_pos, dirty] : chunk_volume_dirty) {
+        if (!dirty) continue;
+
+        const auto chunk = chunks.find(chunk_pos);
+        if (chunk == chunks.end()) continue;
+
+        // Chunk (cx, cy) holds the columns 16cx to 16cx+15, which is where
+        // update_models() meshes it, and a map is only ever one chunk tall.
+        // The map's own transform is not baked in here either: the shader
+        // undoes it when it turns a world position into a voxel coordinate.
+        volume.upload_chunk(
+            Int3{chunk_pos.x * CHUNK_SIZE, chunk_pos.y * CHUNK_SIZE, 0},
+            chunk->second);
+        dirty = false;
     }
 }
 
@@ -216,7 +257,26 @@ bool VoxelMap::write_voxel(const Int3 grid_pos, const VoxelID id) {
     if (voxel == nullptr) return false;
 
     *voxel = id;
-    chunk_was_updated[Int2{floordiv(grid_pos.x, CHUNK_SIZE), floordiv(grid_pos.y, CHUNK_SIZE)}] = true;
+    // The chunk's mesh and its place in the shadow volume are both a voxel out
+    // of date now
+    const Int2 chunk_pos{floordiv(grid_pos.x, CHUNK_SIZE), floordiv(grid_pos.y, CHUNK_SIZE)};
+    chunk_was_updated[chunk_pos] = true;
+    chunk_volume_dirty[chunk_pos] = true;
+
+    // A voxel on the edge of a chunk shows up in its neighbour's mesh too, now
+    // that the mesher reads across the border for hidden faces and for the
+    // ambient occlusion of a corner. The diagonals count as well, as an AO
+    // corner reads them. Only the mesh: the volume holds each chunk on its own.
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            const Int2 other{
+                floordiv(grid_pos.x + dx, CHUNK_SIZE),
+                floordiv(grid_pos.y + dy, CHUNK_SIZE)
+            };
+            if (other == chunk_pos) continue;
+            if (chunks.find(other) != chunks.end()) chunk_was_updated[other] = true;
+        }
+    }
     return true;
 }
 

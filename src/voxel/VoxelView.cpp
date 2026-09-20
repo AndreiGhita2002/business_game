@@ -9,6 +9,10 @@
 #include "game/main.hpp"
 #include "voxel/SingleChunkGrid.hpp"
 
+// How far out the marker for a directional light is drawn, in world units. It
+// has no position of its own, so this is only a place to put the sphere.
+#define LIGHT_MARKER_DISTANCE 50.0f
+
 
 std::string & VoxelView::get_view_type() {
     static std::string TYPE = VOXEL_VIEW_STR;
@@ -18,80 +22,65 @@ std::string & VoxelView::get_view_type() {
 void VoxelView::update(float delta_time) {
     updateCamera();
     updateVoxelMesh();
+    updateVolumes();
     updateLights();
 
     ViewNode::update(delta_time);
 }
 
 void VoxelView::render() {
-    Matrix light_view = {};
-    Matrix light_proj = {};
-
-    // PASS 1: Render all objects into the shadow map render texture
-    // (render textures may be used inside the frame's drawing block)
+    // There is no shadow pass any more. The shader traces a shadow ray through
+    // the world's voxels for every fragment it lights, so the scene is drawn
+    // once and the only thing to set up first is the volume those rays walk.
+    // See resources/shaders/lighting.fs.
     //
-    // Only back faces are written to the shadow map. The recorded depth then
-    // belongs to the far side of a solid, a whole voxel away from the surface
-    // being lit, so a surface can no longer shadow itself. Without this, a
-    // large light box needs a bias so big that shadows come away from their
-    // casters. It relies on the voxel meshes being closed, which they are:
-    // the mesher emits a face wherever the neighbour is air or out of chunk.
-    // The batch is flushed first, as the cull mode is immediate GL state while
-    // the batch is deferred.
-    rlDrawRenderBatchActive();
-    rlSetCullFace(RL_CULL_FACE_FRONT);
-    // A tight depth range around the light. The main camera's 0.01 to 1000
-    // would put nearly all of the depth precision into empty space.
-    rlSetClipPlanes(SHADOW_NEAR, SHADOW_FAR);
-
-    for (Light& light : lights) {
-        BeginTextureMode(*light.shadow_map); {
-            ClearBackground(WHITE);
-            if (light.enabled) {
-                BeginMode3D(light.light_camera); {
-                    light_view = rlGetMatrixModelview();
-                    light_proj = rlGetMatrixProjection();
-                    drawVoxelScene();
-                }
-                EndMode3D();
-            }
-        }
-        EndTextureMode();
-        // Update lightVP
-        light.light_view_proj = MatrixMultiply(light_view, light_proj);
-    }
-
-    // Back to the settings the main camera pass expects
-    rlSetClipPlanes(RL_CULL_DISTANCE_NEAR, RL_CULL_DISTANCE_FAR);
-    rlDrawRenderBatchActive();
-    rlSetCullFace(RL_CULL_FACE_BACK);
-
-    // PASS 2: Drawing
     // Note: the frame's BeginDrawing()/EndDrawing() block is opened by
     // global::mainLoop(), so that the UI views can draw on top of this one.
     rlEnableShader(voxel_shader->id);
-    for (Light& light : lights) {
-        rlActiveTextureSlot(light.texture_loc);
-        rlEnableTexture(light.shadow_map->depth.id);
-        rlSetUniform(light.shadow_map_loc, &light.texture_loc, SHADER_UNIFORM_INT, 1);
-        SetShaderValueMatrix(*voxel_shader, light.vp_loc, light.light_view_proj);
-    }
+    bindWorldVolume();
+
     BeginMode3D(camera); {
         drawVoxelScene();
-
-        // Draw spheres to show where the lights are
-        for (Light& light : lights) {
-            if (light.enabled) DrawSphereEx(light.position, 0.2f, 8, 8, light.color);
-            // only draw disabled light if it is not the light camera while it is attached to camera
-            else if (light.id != this->camera_light_id || !this->move_camera_light)
-                DrawSphereWires(light.position, 0.2f, 8, 8, ColorAlpha(light.color, 0.3f));
-        }
+        drawLightMarkers();
     }
     EndMode3D();
 
-    // PASS 3: the UI
-    // which needs to be drawn on top if the voxel scene, so at the end
+    // The UI, which needs to be drawn on top of the voxel scene, so at the end
     ViewNode::render();
+}
+
+void VoxelView::bindWorldVolume() const {
+    if (!world_volume.is_created()) return;
+
+    world_volume.bind(WORLD_VOLUME_TEXTURE_UNIT);
+    const int unit = WORLD_VOLUME_TEXTURE_UNIT;
+    SetShaderValue(*voxel_shader, volume_loc, &unit, SHADER_UNIFORM_INT);
+
+    // World space back into the map's own space, which is where its voxels
+    // are. Worked out every frame rather than cached, so that moving the map
+    // moves its shadows with it, the same way get_world_transform() is.
+    const Matrix map_matrix = transform_to_matrix(game_map->get_world_transform());
+    SetShaderValueMatrix(*voxel_shader, world_to_volume_loc, MatrixInvert(map_matrix));
+
+    const Int3 size = world_volume.get_size();
+    const int s_size[3] = {size.x, size.y, size.z};
+    SetShaderValue(*voxel_shader, volume_size_loc, s_size, SHADER_UNIFORM_IVEC3);
+}
+
+void VoxelView::drawLightMarkers() const {
+    // A directional light has no position, so its marker is put out along its
+    // own direction from whatever the camera is looking at.
+    for (const Light& light : lights) {
+        const Vector3 direction = light.get_direction();
+        const Vector3 marker = {
+            camera.target.x - direction.x * LIGHT_MARKER_DISTANCE,
+            camera.target.y - direction.y * LIGHT_MARKER_DISTANCE,
+            camera.target.z - direction.z * LIGHT_MARKER_DISTANCE,
+        };
+
+        if (light.enabled) DrawSphereEx(marker, 1.0f, 8, 8, light.color);
+        else DrawSphereWires(marker, 1.0f, 8, 8, ColorAlpha(light.color, 0.3f));
+    }
 }
 
 void VoxelView::updateCamera() {
@@ -170,24 +159,13 @@ void VoxelView::updateCamera() {
 
 void VoxelView::updateLights() {
     // Light Controls
-    // Each of these also has a button in the bottom left, and the O and P keys
-    // are mirrored by the light box rows in the shader menu. Both routes write
-    // the same state, so they stay in step.
-    if (IsKeyReleased(KEY_Y)) move_camera_light = !move_camera_light;
+    // The sun's toggle is also a button in the bottom left, and its angle in
+    // the sky is two rows in the shader menu. Both routes write the same light,
+    // so they stay in step.
     if (IsKeyReleased(KEY_U)) lights[sun_light_id].enabled = !lights[sun_light_id].enabled;
-    if (IsKeyReleased(KEY_I)) lights[camera_light_id].enabled = !lights[camera_light_id].enabled;
-
-    // Camera Light
-    if (move_camera_light) {
-        lights[camera_light_id].position = camera.position;
-        lights[camera_light_id].target = camera.target;
-    }
-
-    if (IsKeyPressed(KEY_O)) lights[camera_light_id].light_camera.fovy += 1.0f;
-    if (IsKeyPressed(KEY_P)) lights[camera_light_id].light_camera.fovy -= 1.0f;
 
     // Update
-    for (Light &light : lights) {
+    for (const Light &light : lights) {
         light.update(*voxel_shader);
     }
 }
@@ -196,6 +174,12 @@ void VoxelView::updateVoxelMesh() const {
     for (VoxelGrid* grid : voxel_grids) {
         grid->update_models();
     }
+}
+
+void VoxelView::updateVolumes() {
+    // Only the map is traced for now, so only the map has a volume. A grid with
+    // a transform of its own needs one of its own, which is a later step.
+    game_map->update_volume(world_volume);
 }
 
 VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader)
@@ -213,25 +197,33 @@ VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader)
     };
 
     // Lights
-    // Create lights
+    // One light, the sun, which is an angle in the sky and a colour. Shadows
+    // are traced through the world volume in the fragment shader, so a light
+    // carries no shadow map and nothing has to be fitted around the scene.
+    // The vector is reserved at its final size and never grown again, because
+    // the shader menu edits the sun's angles through a pointer into it.
     lights = std::vector<Light>();
     lights.reserve(2);
-    auto sun_pos = Vector3{32.0, 8.0, 32.0};
-    auto sun_tgt = Vector3{48.0, 0.0, 48.0};
-    camera_light_id = Light::create(
-        DIRECTIONAL_LIGHT,
-        camera.position, camera.target, WHITE,
+    sun_light_id = Light::create_directional(
+        55.0f, 135.0f, WHITE,
         *voxel_shader, &lights, next_light_id++);
-    sun_light_id = Light::create(
-        DIRECTIONAL_LIGHT,
-        sun_pos, sun_tgt, WHITE,
-        *voxel_shader, &lights, next_light_id++);
+
+    // Where the world volume's uniforms sit in the shader
+    volume_loc = GetShaderLocation(*voxel_shader, "worldVolume");
+    world_to_volume_loc = GetShaderLocation(*voxel_shader, "worldToVolume");
+    volume_size_loc = GetShaderLocation(*voxel_shader, "volumeSize");
 
     // Voxels
     voxel_grids = std::vector<VoxelGrid*>();
 
     game_map = new VoxelMap(this, 128, 128);
     voxel_grids.emplace_back(game_map);
+
+    // The voxels the shadow rays are traced against. Sized to whole chunks
+    // rather than to the map, so that a chunk upload can never hang over the
+    // edge of the texture. The map fills it on the first update.
+    const Int2 chunk_count = game_map->get_chunk_count();
+    world_volume.create(Int3{chunk_count.x * CHUNK_SIZE, chunk_count.y * CHUNK_SIZE, CHUNK_SIZE});
 
     auto single_chunk_grid = new SingleChunkGrid(this, game_map->voxel_colours);
     *single_chunk_grid->get_voxel(Int3(0.0,0.0,0.0)) = 3;

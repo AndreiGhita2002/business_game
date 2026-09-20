@@ -13,6 +13,14 @@
 #include "VoxelMap.hpp"
 #include "game/main.hpp"
 
+// How bright a face corner is at each of the four AO levels, 0 being a corner
+// closed on both sides and 3 being open. Baked into the vertex colours, so
+// changing these means remeshing.
+static constexpr float AO_SHADE[4] = {0.4f, 0.6f, 0.8f, 1.0f};
+
+// The chunk plus one voxel of its neighbours on every side, which is as far as
+// a face or an AO corner ever reads.
+static constexpr int PADDED_SIZE = CHUNK_SIZE + 2;
 
 // Helper: linear index for (x,y,z_map) in chunk
 static int idx(int x, int y, int z) {
@@ -26,15 +34,26 @@ static bool inChunk(int x, int y, int z) {
            (0 <= z && z < CHUNK_SIZE);
 }
 
-struct Accum {
-    std::vector<float> vertices;   // 3 per vertex
-    std::vector<float> normals;    // 3 per vertex
-    std::vector<float> uvs;        // 2 per vertex (keep simple 0..1)
-    std::vector<unsigned short> indices; // 3 per triangle
-};
+// Helper: linear index into the padded copy, where -1 is a legal coordinate
+static int paddedIdx(int x, int y, int z) {
+    return (x + 1) + (y + 1) * PADDED_SIZE + (z + 1) * PADDED_SIZE * PADDED_SIZE;
+}
 
-std::vector<MaterialMesh>
-build_chunk_mesh(const VoxelChunk& chunk, Vector3 origin, float voxelSize) {
+// Helper: one component of a corner offset, by axis number
+static float axisValue(const Vector3& v, int axis) {
+    return axis == 0 ? v.x : (axis == 1 ? v.y : v.z);
+}
+
+int vertex_ao(const bool side1, const bool side2, const bool corner) {
+    // Two solid sides meet in front of the corner, so whatever is diagonally
+    // behind them cannot be seen and the corner is as dark as it gets
+    if (side1 && side2) return 0;
+    return 3 - (static_cast<int>(side1) + static_cast<int>(side2) + static_cast<int>(corner));
+}
+
+std::vector<MaterialMeshData>
+build_chunk_mesh_data(const VoxelChunk& chunk, const VoxelNeighbourSampler& neighbour,
+                      const Vector3 origin, const float voxelSize) {
     //TODO (optimisation)
     // the chunk mesher could be massively improved if it was switched to a greedy algorithm
 
@@ -67,16 +86,46 @@ build_chunk_mesh(const VoxelChunk& chunk, Vector3 origin, float voxelSize) {
 
     const float faceUV[8] = { 0,0,  1,0,  1,1,  0,1 };
 
+    // The chunk with a one voxel shell of its neighbours around it. Everything
+    // below reads this rather than the chunk, so a coordinate just outside is
+    // an ordinary lookup: it is what lets a face be left out where the next
+    // chunk is solid, and what an AO corner reads diagonally.
+    std::vector<VoxelID> padded(PADDED_SIZE * PADDED_SIZE * PADDED_SIZE, 0);
+    for (int z = -1; z <= CHUNK_SIZE; ++z) {
+        for (int y = -1; y <= CHUNK_SIZE; ++y) {
+            for (int x = -1; x <= CHUNK_SIZE; ++x) {
+                VoxelID v = 0;
+                if (inChunk(x, y, z)) v = chunk[idx(x, y, z)];
+                else if (neighbour) v = neighbour(x, y, z);
+                padded[paddedIdx(x, y, z)] = v;
+            }
+        }
+    }
+    auto solid_at = [&padded](const int x, const int y, const int z) {
+        return padded[paddedIdx(x, y, z)] != 0;
+    };
+
     // Accumulate per material id
-    std::unordered_map<VoxelID, Accum> byMat;
+    std::unordered_map<VoxelID, MaterialMeshData> byMat;
     byMat.reserve(8);
 
-    auto emitFace = [&](Accum& A, int x, int y, int z, int f) {
+    auto emitFace = [&](MaterialMeshData& A, int x, int y, int z, int f) {
         const float bx = static_cast<float>(x);
         const float by = static_cast<float>(y);
         const float bz = static_cast<float>(z);
 
         const size_t baseIndex = A.vertices.size() / 3;
+
+        // The axis the face looks along, and the two that lie in its plane
+        const int faceAxis = f / 2;
+        const int axisU = (faceAxis + 1) % 3;
+        const int axisV = (faceAxis + 2) % 3;
+
+        // The air voxel in front of the face, which is where an AO corner
+        // looks around itself
+        const int front[3] = {x + dirs[f].dx, y + dirs[f].dy, z + dirs[f].dz};
+
+        int ao[4] = {3, 3, 3, 3};
 
         for (int i = 0; i < 4; ++i) {
             const Vector3 cm = faceCornersMap[f][i];
@@ -99,18 +148,55 @@ build_chunk_mesh(const VoxelChunk& chunk, Vector3 origin, float voxelSize) {
 
             A.uvs.push_back(faceUV[i*2 + 0]);
             A.uvs.push_back(faceUV[i*2 + 1]);
+
+            // Which way this corner sits in the face's own plane. The corner
+            // offsets are 0 or 1 on each axis, so a 1 is the far side.
+            const int stepU = axisValue(cm, axisU) > 0.5f ? 1 : -1;
+            const int stepV = axisValue(cm, axisV) > 0.5f ? 1 : -1;
+
+            int side1[3] = {front[0], front[1], front[2]};
+            int side2[3] = {front[0], front[1], front[2]};
+            int corner[3] = {front[0], front[1], front[2]};
+            side1[axisU] += stepU;
+            side2[axisV] += stepV;
+            corner[axisU] += stepU;
+            corner[axisV] += stepV;
+
+            ao[i] = vertex_ao(
+                solid_at(side1[0], side1[1], side1[2]),
+                solid_at(side2[0], side2[1], side2[2]),
+                solid_at(corner[0], corner[1], corner[2]));
+
+            const auto shade = static_cast<unsigned char>(AO_SHADE[ao[i]] * 255.0f);
+            A.colors.push_back(shade);
+            A.colors.push_back(shade);
+            A.colors.push_back(shade);
+            A.colors.push_back(255);
         }
 
-        // Two triangles (0,1,2) and (0,2,3)
-        A.indices.push_back(static_cast<unsigned short>(baseIndex + 0));
-        A.indices.push_back(static_cast<unsigned short>(baseIndex + 1));
-        A.indices.push_back(static_cast<unsigned short>(baseIndex + 2));
-        A.indices.push_back(static_cast<unsigned short>(baseIndex + 0));
-        A.indices.push_back(static_cast<unsigned short>(baseIndex + 2));
-        A.indices.push_back(static_cast<unsigned short>(baseIndex + 3));
+        // Which way the quad is split matters once its corners differ: the
+        // shade is interpolated across each triangle, so the wrong diagonal
+        // leaves a crease running the other way. Splitting along the darker
+        // diagonal is the usual rule (0fps.net's flipped quad).
+        if (ao[0] + ao[2] > ao[1] + ao[3]) {
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 1));
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 2));
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 3));
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 1));
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 3));
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 0));
+        } else {
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 0));
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 1));
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 2));
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 0));
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 2));
+            A.indices.push_back(static_cast<unsigned short>(baseIndex + 3));
+        }
     };
 
-    // Walk voxels: add faces only when neighbor is AIR (0)
+    // Walk voxels: add faces only when the neighbor is AIR (0), which now
+    // includes the neighbour in the next chunk along
     for (int z = 0; z < CHUNK_SIZE; ++z) {
         for (int y = 0; y < CHUNK_SIZE; ++y) {
             for (int x = 0; x < CHUNK_SIZE; ++x) {
@@ -122,15 +208,9 @@ build_chunk_mesh(const VoxelChunk& chunk, Vector3 origin, float voxelSize) {
                     const int ny = y + dirs[f].dy;
                     const int nz = z + dirs[f].dz;
 
-                    bool neighborSolid = false;
-                    if (inChunk(nx, ny, nz)) {
-                        neighborSolid = (chunk[idx(nx,ny,nz)] != 0);
-                    } else {
-                        // Treat OOB as air; stitch with neighbor chunks later if desired
-                        neighborSolid = false;
-                    }
-                    if (!neighborSolid) {
-                        Accum& A = byMat[v];
+                    if (!solid_at(nx, ny, nz)) {
+                        MaterialMeshData& A = byMat[v];
+                        A.id = v;
                         emitFace(A, x, y, z, f);
                     }
                 }
@@ -138,10 +218,17 @@ build_chunk_mesh(const VoxelChunk& chunk, Vector3 origin, float voxelSize) {
         }
     }
 
-    // Convert accumulators to GPU meshes
-    std::vector<MaterialMesh> result;
+    std::vector<MaterialMeshData> result;
     result.reserve(byMat.size());
-    for (auto& [id, A] : byMat) {
+    for (auto& [id, data] : byMat) result.push_back(std::move(data));
+    return result;
+}
+
+std::vector<MaterialMesh> upload_chunk_mesh(const std::vector<MaterialMeshData>& data) {
+    std::vector<MaterialMesh> result;
+    result.reserve(data.size());
+
+    for (const MaterialMeshData& A : data) {
         Mesh mesh = {0};
         mesh.vertexCount   = static_cast<int>(A.vertices.size() / 3);
         mesh.triangleCount = static_cast<int>(A.indices.size() / 3);
@@ -158,16 +245,28 @@ build_chunk_mesh(const VoxelChunk& chunk, Vector3 origin, float voxelSize) {
             mesh.texcoords = (float*)MemAlloc(A.uvs.size() * sizeof(float));
             std::memcpy(mesh.texcoords, A.uvs.data(), A.uvs.size() * sizeof(float));
         }
+        // The ambient occlusion rides in the vertex colours, which the lighting
+        // shader reads as a shade rather than as a tint. See lighting.fs.
+        if (!A.colors.empty()) {
+            mesh.colors = (unsigned char*)MemAlloc(A.colors.size() * sizeof(unsigned char));
+            std::memcpy(mesh.colors, A.colors.data(), A.colors.size() * sizeof(unsigned char));
+        }
         if (!A.indices.empty()) {
             mesh.indices = (unsigned short*)MemAlloc(A.indices.size() * sizeof(unsigned short));
             std::memcpy(mesh.indices, A.indices.data(), A.indices.size() * sizeof(unsigned short));
         }
 
         UploadMesh(&mesh, false); // static by default
-        result.push_back(MaterialMesh{ id, mesh });
+        result.push_back(MaterialMesh{ A.id, mesh });
     }
 
     return result;
+}
+
+std::vector<MaterialMesh>
+build_chunk_mesh(const VoxelChunk& chunk, const VoxelNeighbourSampler& neighbour,
+                 const Vector3 origin, const float voxelSize) {
+    return upload_chunk_mesh(build_chunk_mesh_data(chunk, neighbour, origin, voxelSize));
 }
 
 Model build_chunk_model(const std::vector<MaterialMesh> &mats, const std::map<VoxelID, Color> &voxelColourMap) {

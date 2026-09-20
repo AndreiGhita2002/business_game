@@ -39,6 +39,25 @@ struct VoxelRayHit {
 Matrix voxel_model_matrix(const VoxelGrid* grid, const ModelInfo& model_info);
 
 /**
+ * Walks a grid's voxels from `origin` along `dir`, both in that grid's own
+ * coordinates, and answers whether a solid voxel blocks the way before the ray
+ * leaves the grid.
+ *
+ * This is the same walk the lighting shader does for a shadow ray, kept here in
+ * C++ because a shader cannot be unit tested: the awkward cases (a ray along an
+ * axis, a ray starting exactly on a face, a ray leaving the world) are the same
+ * in both. The two have to be changed together - see volume_blocked() in
+ * resources/shaders/lighting.fs.
+ *
+ * A ray that starts outside the grid is not carried to it first, which is the
+ * one thing the shader does differently, as it has a volume to aim at.
+ *
+ * @param max_steps: how many voxels to cross before giving up and answering
+ *        false, the same cap the shader has.
+ */
+bool voxel_ray_blocked(VoxelGrid* grid, Vector3 origin, Vector3 dir, int max_steps = 256);
+
+/**
  * Does a ray cast and returns the closest voxel model on the line.
  *
  * @param ray: the ray, for mouse ray get it from `GetScreenToWorldRay`

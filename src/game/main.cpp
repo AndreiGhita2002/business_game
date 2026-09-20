@@ -51,10 +51,6 @@ void global::init() {
     int ambientLoc = GetShaderLocation(voxel_shader, "ambient");
     SetShaderValue(voxel_shader, ambientLoc, ambient, SHADER_UNIFORM_VEC4);
 
-    // Shadow map resolution
-    auto res = SHADOWMAP_RESOLUTION;
-    SetShaderValue(voxel_shader, GetShaderLocation(voxel_shader, "shadowMapResolution"), &res, SHADER_UNIFORM_INT);
-
     // Voxels
     root_view->add_child(std::make_unique<VoxelView>(root_view.get(), &voxel_shader));
     auto voxel_view = static_cast<VoxelView *>(root_view->child.get());
@@ -80,16 +76,20 @@ void global::init() {
     auto shader_menu = shader_menu_node.get();
     shader_menu->bounds = Rectangle{UI_MARGIN, UI_MARGIN + UI_BUTTON_HEIGHT + UI_BUTTON_GAP, 0.0f, 0.0f};
 
-    // The light boxes are not shader uniforms, but they belong on the same
-    // panel. These two replace the O and P keys, which only reached the camera
-    // light. Pointers into the light vector are stable because it is reserved
-    // at its final size and never grown again.
-    shader_menu->add_value_row("sun box",
-        &voxel_view->lights[voxel_view->sun_light_id].light_camera.fovy,
-        8.0f, 8.0f, 512.0f, 0, {});
-    shader_menu->add_value_row("camera box",
-        &voxel_view->lights[voxel_view->camera_light_id].light_camera.fovy,
-        8.0f, 8.0f, 512.0f, 0, {});
+    // Where the sun sits in the sky. These are not shader uniforms, but they
+    // belong on the same panel: Light::update() sends the direction it works
+    // out from them every frame, so the rows need no callback of their own.
+    // Pointers into the light vector are stable because it is reserved at its
+    // final size and never grown again.
+    // A very low sun is left out of the range on purpose - the flatter the
+    // angle, the further a shadow ray has to travel before it clears the
+    // terrain, and the sooner it runs into the shader's step cap.
+    shader_menu->add_value_row("sun elevation",
+        &voxel_view->lights[voxel_view->sun_light_id].elevation,
+        1.0f, 5.0f, 90.0f, 0, {});
+    shader_menu->add_value_row("sun azimuth",
+        &voxel_view->lights[voxel_view->sun_light_id].azimuth,
+        5.0f, 0.0f, 360.0f, 0, {});
 
     ui_view->add_child(std::move(shader_menu_node));
 
@@ -111,15 +111,6 @@ void global::init() {
     add_bottom_left_button("Toggle Sun", [voxel_view] {
         Light& sun = voxel_view->lights[voxel_view->sun_light_id];
         sun.enabled = !sun.enabled;
-    });
-    // I
-    add_bottom_left_button("Toggle Camera Light", [voxel_view] {
-        Light& camera_light = voxel_view->lights[voxel_view->camera_light_id];
-        camera_light.enabled = !camera_light.enabled;
-    });
-    // Y
-    add_bottom_left_button("Light Follows Camera", [voxel_view] {
-        voxel_view->move_camera_light = !voxel_view->move_camera_light;
     });
 
     // Moving and turning a grid, on the right edge. Its rows and its attachment
@@ -187,41 +178,13 @@ raylib::Shader global::loadAndPatchShader(const std::string& shader_path, int li
     std::string vertex = loadFile(shader_path + ".vs");
     std::string fragment = loadFile(shader_path + ".fs");
 
-    // Regex for finding the declaration in the file
-    static const std::regex shadow_decl{
-        R"(\buniform\s+sampler2D\s+shadowMap\b\s*;)",
-        std::regex::ECMAScript
-    };
-    static const std::regex vp_decl{
-        R"(\buniform\s+mat4\s+lightVP\b\s*;)",
-        std::regex::ECMAScript
-    };
-    static const std::regex shadow_get_decl{R"(GetShadowMapFunction)", std::regex::ECMAScript};
-    static const std::regex vp_get_decl{R"(GetLightVPFunction)", std::regex::ECMAScript};
+    // Only the light count is patched in. The shadow map samplers and the light
+    // matrices that used to be unrolled here went with the shadow pass: the
+    // shader traces its shadows through the world volume now, which is one
+    // texture however many lights there are.
     static const std::regex max_lights_define{R"(#define MAX_LIGHTS x)", std::regex::ECMAScript};
-
-    // Build replacement block
-    std::ostringstream shadow_oss, vp_oss, shadow_get_oss, vp_get_oss;
-    for (std::size_t i = 0; i < light_count; ++i) {
-        shadow_oss << "uniform sampler2D shadowMap" << i << ";\n";
-        vp_oss << "uniform mat4 lightVP" << i << ";\n";
-
-        if (i != light_count - 1) {
-            shadow_get_oss << "    if (i == " << i << ") return texture(shadowMap" << i << ", uv).r;\n";
-            vp_get_oss     << "    if (i == " << i << ") return lightVP"   << i << ";\n";
-        } else {
-            // last iterator
-            shadow_get_oss << "    return texture(shadowMap" << i << ", uv).r;";
-            vp_get_oss     << "    return lightVP"   << i << ";";
-        }
-    }
-    // Patching
-    auto fragment_patched = std::regex_replace(fragment, shadow_decl, shadow_oss.str());
-    fragment_patched = std::regex_replace(fragment_patched, vp_decl, vp_oss.str());
-    fragment_patched = std::regex_replace(fragment_patched, shadow_get_decl, shadow_get_oss.str());
-    fragment_patched = std::regex_replace(fragment_patched, vp_get_decl, vp_get_oss.str());
-    std::string new_lights_define = "#define MAX_LIGHTS " + std::to_string(light_count);
-    fragment_patched = std::regex_replace(fragment_patched, max_lights_define, new_lights_define);
+    const std::string new_lights_define = "#define MAX_LIGHTS " + std::to_string(light_count);
+    const std::string fragment_patched = std::regex_replace(fragment, max_lights_define, new_lights_define);
 
     return LoadShaderFromMemory(vertex.c_str(), fragment_patched.c_str());
 }

@@ -22,8 +22,10 @@ void main() {
     fragPosition = vec3(matModel*vec4(vertexPosition, 1.0));
     fragTexCoord = vertexTexCoord;
     fragColor = vertexColor;
-     fragNormal = normalize(vec3(matNormal*vec4(vertexNormal, 1.0)));
-//    fragNormal = normalize(mat3(matNormal) * vertexNormal);
+    // A normal is a direction, so only the rotation and scale part of the
+    // matrix applies to it. The vec4(n, 1.0) form dragged the translation in
+    // with it, which skewed the normals of anything drawn away from the origin.
+    fragNormal = normalize(mat3(matNormal) * vertexNormal);
 
     // Calculate final vertex position
     gl_Position = mvp*vec4(vertexPosition, 1.0);

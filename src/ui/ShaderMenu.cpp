@@ -17,26 +17,25 @@ std::string& ShaderMenu::get_view_type() {
 ShaderMenu::ShaderMenu(ViewNode* parent, raylib::Shader* shader)
     : UINode(parent, Rectangle{16.0f, 16.0f, 0.0f, 0.0f}, Anchor::TOP_LEFT),
       visible(false), shader(shader),
-      bias_texels(BIAS_TEXELS_DEFAULT),
-      bias_slope_texels(BIAS_SLOPE_TEXELS_DEFAULT),
-      bias_max_slope(BIAS_MAX_SLOPE_DEFAULT),
       ambient_level(global::ambient[0]),
+      ao_direct(AO_DIRECT_DEFAULT),
+      shadow_steps_view(0.0f),
       row_count(0)
 {
-    bias_texels_loc = GetShaderLocation(*shader, "biasTexels");
-    bias_slope_texels_loc = GetShaderLocation(*shader, "biasSlopeTexels");
-    bias_max_slope_loc = GetShaderLocation(*shader, "biasMaxSlope");
     ambient_loc = GetShaderLocation(*shader, "ambient");
+    ao_direct_loc = GetShaderLocation(*shader, "aoDirectStrength");
+    debug_shadow_steps_loc = GetShaderLocation(*shader, "debugShadowSteps");
 
-    add_value_row("bias texels", &bias_texels, 0.25f, 0.0f, 16.0f, 2, [this] { push_bias(); });
-    add_value_row("bias slope", &bias_slope_texels, 0.25f, 0.0f, 32.0f, 2, [this] { push_bias(); });
-    add_value_row("bias max slope", &bias_max_slope, 0.5f, 0.0f, 64.0f, 2, [this] { push_bias(); });
     add_value_row("ambient", &ambient_level, 0.01f, 0.0f, 1.0f, 3, [this] { push_ambient(); });
+    add_value_row("ao direct", &ao_direct, 0.05f, 0.0f, 1.0f, 2, [this] { push_ao_direct(); });
+    add_value_row("step view", &shadow_steps_view, 1.0f, 0.0f, 1.0f, 0,
+                  [this] { push_shadow_steps_view(); });
 
-    // The shader has no constants of its own any more, so the starting values
-    // have to be sent before the first frame is drawn.
-    push_bias();
+    // Sent before the first frame is drawn, as the shader holds no defaults of
+    // its own for these
     push_ambient();
+    push_ao_direct();
+    push_shadow_steps_view();
 }
 
 void ShaderMenu::add_value_row(std::string label, float* value, const float step,
@@ -54,18 +53,21 @@ void ShaderMenu::add_value_row(std::string label, float* value, const float step
     row_count++;
 }
 
-void ShaderMenu::push_bias() const {
-    SetShaderValue(*shader, bias_texels_loc, &bias_texels, SHADER_UNIFORM_FLOAT);
-    SetShaderValue(*shader, bias_slope_texels_loc, &bias_slope_texels, SHADER_UNIFORM_FLOAT);
-    SetShaderValue(*shader, bias_max_slope_loc, &bias_max_slope, SHADER_UNIFORM_FLOAT);
-}
-
 void ShaderMenu::push_ambient() const {
     // The shader takes a vec4, and the level drives the three colour channels
     global::ambient[0] = ambient_level;
     global::ambient[1] = ambient_level;
     global::ambient[2] = ambient_level;
     SetShaderValue(*shader, ambient_loc, global::ambient, SHADER_UNIFORM_VEC4);
+}
+
+void ShaderMenu::push_ao_direct() const {
+    SetShaderValue(*shader, ao_direct_loc, &ao_direct, SHADER_UNIFORM_FLOAT);
+}
+
+void ShaderMenu::push_shadow_steps_view() const {
+    const int on = shadow_steps_view > 0.0f ? 1 : 0;
+    SetShaderValue(*shader, debug_shadow_steps_loc, &on, SHADER_UNIFORM_INT);
 }
 
 Vector2 ShaderMenu::measure() {
