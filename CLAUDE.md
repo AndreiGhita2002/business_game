@@ -65,7 +65,8 @@ what limits what they can cover:
 - `test_voxel_mesh.cpp` - `build_chunk_mesh_data()`: which faces come out, the
   faces dropped against a neighbouring chunk, and the baked ambient occlusion.
 - `test_voxel_ray.cpp` - `voxel_ray_blocked()`, the voxel walk a shadow ray
-  does, which is the testable twin of the one in `lighting.fs`.
+  does, which is the testable twin of the one in `lighting.fs`, plus the boxes
+  that decide which grids a draw call is traced against.
 - `TestHelpers.hpp` - a palette, a self-deleting temp directory, and the
   `REQUIRE_VEC3_EQ` / `REQUIRE_QUAT_EQ` / `REQUIRE_TRANSFORM_EQ` comparisons.
   Include it **first** in a test file: `raymath.h` redefines raylib's vector
@@ -120,6 +121,13 @@ texture, one byte each, for the lighting shader to trace shadow rays through.
 `chunk_volume_dirty` because the mesh and the volume are brought up to date by
 different calls. This is the one file that calls OpenGL directly: rlgl has no 3D
 textures.
+
+**VoxelBrickAtlas** (`src/voxel/VoxelBrickAtlas.cpp/hpp`) - One VoxelVolume cut
+into chunk-sized bricks, a slot per grid, so that every grid that is not the map
+can cast a shadow without needing a texture unit of its own. 8x8x4 bricks is 256
+grids in a megabyte. A grid holds its slot in `VoxelGrid::volume_slot` and
+returns it when it is destroyed; `volume_dirty` says when its brick needs
+writing again.
 
 ### Grid Transforms
 
@@ -293,11 +301,22 @@ any more:
 - A directional light is an elevation and an azimuth, with no position and no
   camera of its own. `Light::get_direction()` turns the two into the direction
   the light travels.
-- **Only the map is in the volume.** A grid with its own transform (a vehicle)
-  does not cast a shadow and does not shadow itself yet: that needs a volume per
-  grid, marched in the grid's own space.
-- The volume is bound to texture unit `WORLD_VOLUME_TEXTURE_UNIT` (12), above
-  the units raylib hands to a material's own maps as it draws.
+- **Every other grid has a brick in `VoxelBrickAtlas`**, traced after the world
+  volume, so a vehicle casts a shadow onto the terrain, onto other vehicles and
+  onto itself. A grid takes a slot the first time it is uploaded and hands it
+  back in `~VoxelGrid`, through `VoxelView::release_grid_volume()`.
+- A grid's ray is traced **in the grid's own space**: the shader is handed
+  `MatrixInvert` of the grid's world matrix, and inside it the voxels are axis
+  aligned again. Nothing is baked per frame, so a turning wheel is exact.
+- Which bricks a model is traced against is decided **per draw call**, in
+  `VoxelView::sendGridVolumes()`: a grid is sent only when its box, dragged
+  along the sun by `SHADOW_CASTER_REACH`, still reaches the model
+  (`box_casts_onto()` in `game/Picking.cpp`). At most `MAX_GRID_VOLUMES` of
+  them, which `loadAndPatchShader()` patches into the shader so the two sides
+  cannot disagree.
+- The volumes are bound to texture units `WORLD_VOLUME_TEXTURE_UNIT` (12) and
+  `GRID_ATLAS_TEXTURE_UNIT` (13), above the units raylib hands to a material's
+  own maps as it draws.
 - ShaderMenu's `step view` row colours every fragment by how far its shadow ray
   travelled, green for short and red for long. It is the tool for finding where
   the rays are getting expensive.

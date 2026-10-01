@@ -12,8 +12,8 @@
 //  POINT lights are lit but NOT shadowed here (visibility = 1.0).
 //  MAX_LIGHTS is patched in by global::loadAndPatchShader(), so this shader
 //  will not compile by itself.
-//  Only the world volume is traced for now, so a grid with its own transform
-//  (a vehicle) neither casts a shadow nor shadows itself yet.
+//  A ray is traced through the world's voxels first, then through whatever
+//  grid volumes this draw call was given, each in its own space.
 // TODO(claude): a web build needs a GLSL ES 3.00 variant of this file, which
 //  wants `precision highp sampler3D` and the version line changed.
 
@@ -53,10 +53,28 @@ uniform vec3  viewPos;   // camera position (world)
 // The world's voxels, one byte each, holding the VoxelID.
 uniform sampler3D worldVolume;
 // World space into the volume's model space. The axis swap back into grid
-// order is done below, in world_to_voxel().
+// order is done below, in to_voxel().
 uniform mat4 worldToVolume;
 // Size of the volume in voxels, so a ray knows when it has left the world
 uniform ivec3 volumeSize;
+
+// The grids that are not the map: one brick of the atlas each, one chunk on a
+// side. MAX_GRID_VOLUMES is patched in alongside MAX_LIGHTS, from the constant
+// of the same name in VoxelView.hpp.
+#define MAX_GRID_VOLUMES x
+// Must match CHUNK_SIZE in VoxelGrid.hpp: a brick holds exactly one chunk.
+#define GRID_VOLUME_SIZE 16
+
+struct GridVolume {
+    mat4 worldToGrid;   // world space into this grid's own model space
+    vec3 atlasOrigin;   // where its brick starts in the atlas, in voxels
+};
+
+uniform GridVolume gridVolumes[MAX_GRID_VOLUMES];
+// How many of them this draw call was given. VoxelView picks them per model,
+// so a fragment only ever traces the volumes that could reach it.
+uniform int gridVolumeCount;
+uniform sampler3D gridAtlas;
 
 // How much of the baked ambient occlusion is taken off direct light as well as
 // ambient. 0 leaves sunlit faces alone, 1 darkens them as much as shaded ones.
@@ -69,18 +87,18 @@ uniform int debugShadowSteps;
 // Output
 out vec4 finalColor;
 
-// A point in world space, in voxel coordinates of the volume.
-vec3 world_to_voxel(vec3 p) {
-    vec3 m = (worldToVolume * vec4(p, 1.0)).xyz;
+// A point in world space, in voxel coordinates of whichever volume `m` undoes.
+vec3 to_voxel(mat4 m, vec3 p) {
+    vec3 v = (m * vec4(p, 1.0)).xyz;
     // Model space is the mesher's - X is grid x, Y is grid z (up), Z is grid y
     // - and the texture is laid out in grid order, so the two swap back here.
-    return vec3(m.x, m.z, m.y);
+    return vec3(v.x, v.z, v.y);
 }
 
 // The same for a direction, which carries no translation.
-vec3 world_to_voxel_dir(vec3 d) {
-    vec3 m = mat3(worldToVolume) * d;
-    return vec3(m.x, m.z, m.y);
+vec3 to_voxel_dir(mat4 m, vec3 d) {
+    vec3 v = mat3(m) * d;
+    return vec3(v.x, v.z, v.y);
 }
 
 /**
@@ -92,9 +110,8 @@ vec3 world_to_voxel_dir(vec3 d) {
  * same walk is in C++ in voxel_ray_blocked() (game/Picking.cpp), which is what
  * the unit tests cover, as a shader cannot be tested. Change the two together.
  */
-bool volume_blocked(vec3 origin, vec3 dir, out int steps) {
-    steps = 0;
-    if (volumeSize.x <= 0) return false;
+bool march_volume(sampler3D tex, ivec3 texOrigin, ivec3 size, vec3 origin, vec3 dir, inout int steps) {
+    if (size.x <= 0) return false;
 
     // A component of exactly zero would divide by zero below. Nudged to
     // something tiny, the boundary on that axis lands so far away that the walk
@@ -110,7 +127,7 @@ bool volume_blocked(vec3 origin, vec3 dir, out int steps) {
     // outside it - a grid floating above the map - still reaches what is
     // inside. Ray against the volume's box, near and far.
     vec3 t_lo = (vec3(0.0) - origin) * inv_d;
-    vec3 t_hi = (vec3(volumeSize) - origin) * inv_d;
+    vec3 t_hi = (vec3(size) - origin) * inv_d;
     vec3 t_near = min(t_lo, t_hi);
     vec3 t_far  = max(t_lo, t_hi);
     float t_enter = max(max(t_near.x, t_near.y), t_near.z);
@@ -124,7 +141,7 @@ bool volume_blocked(vec3 origin, vec3 dir, out int steps) {
     float t_start = max(t_enter, 0.0) + 1e-4;
     vec3 p = origin + d * t_start;
 
-    ivec3 voxel = clamp(ivec3(floor(p)), ivec3(0), volumeSize - ivec3(1));
+    ivec3 voxel = clamp(ivec3(floor(p)), ivec3(0), size - ivec3(1));
     ivec3 step_dir = ivec3(sign(d));
     // How much t buys one whole voxel on each axis, and how much is left to the
     // first boundary from where the walk starts
@@ -132,12 +149,14 @@ bool volume_blocked(vec3 origin, vec3 dir, out int steps) {
     vec3 t_max = (vec3(voxel) + max(vec3(step_dir), vec3(0.0)) - p) * inv_d;
 
     for (int i = 0; i < SHADOW_MAX_STEPS; ++i) {
-        // Out of the world: nothing left that could block the ray
-        if (any(lessThan(voxel, ivec3(0))) || any(greaterThanEqual(voxel, volumeSize)))
+        // Out of this volume: nothing left in it that could block the ray
+        if (any(lessThan(voxel, ivec3(0))) || any(greaterThanEqual(voxel, size)))
             return false;
 
-        steps = i + 1;
-        if (texelFetch(worldVolume, voxel, 0).r > 0.0) return true;
+        steps += 1;
+        // texOrigin is where this volume sits in its texture, which is the
+        // whole texture for the world and one brick of it for a grid
+        if (texelFetch(tex, texOrigin + voxel, 0).r > 0.0) return true;
 
         // Step across the nearest boundary of the three
         if (t_max.x < t_max.y) {
@@ -163,10 +182,28 @@ float light_visibility(int i, vec3 N, out int steps) {
     // voxel normal is exact, so this nudge always lands in the right voxel at
     // any angle: it is the one constant the shadows need, and it does not want
     // tuning the way a depth bias did.
-    vec3 origin = world_to_voxel(fragPosition + N * 0.01);
-    vec3 dir = world_to_voxel_dir(-lights[i].direction);
+    vec3 start = fragPosition + N * 0.01;
+    vec3 toLight = -lights[i].direction;
 
-    return volume_blocked(origin, dir, steps) ? 0.0 : 1.0;
+    // The world first: the terrain is what most rays run into
+    if (march_volume(worldVolume, ivec3(0), volumeSize,
+                     to_voxel(worldToVolume, start),
+                     to_voxel_dir(worldToVolume, toLight), steps))
+        return 0.0;
+
+    // Then the grids this draw call was handed, each traced in its own space.
+    // That is what makes a turned or moving vehicle exact: its voxels are axis
+    // aligned again once the ray is in there with them.
+    for (int g = 0; g < MAX_GRID_VOLUMES; ++g) {
+        if (g >= gridVolumeCount) break;
+
+        mat4 m = gridVolumes[g].worldToGrid;
+        if (march_volume(gridAtlas, ivec3(gridVolumes[g].atlasOrigin), ivec3(GRID_VOLUME_SIZE),
+                         to_voxel(m, start), to_voxel_dir(m, toLight), steps))
+            return 0.0;
+    }
+
+    return 1.0;
 }
 
 void main() {

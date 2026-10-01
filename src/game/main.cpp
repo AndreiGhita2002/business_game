@@ -44,7 +44,7 @@ void global::init() {
 
     root_view = std::make_unique<ViewNode>(nullptr);
 
-    voxel_shader = loadAndPatchShader("../resources/shaders/lighting", 2);
+    voxel_shader = loadAndPatchShader("../resources/shaders/lighting", 2, MAX_GRID_VOLUMES);
     voxel_shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(voxel_shader, "viewPos");
 
     // Ambient light level (some basic lighting)
@@ -186,17 +186,24 @@ std::string global::loadFile(const std::string& path) {
     return buffer.str();
 }
 
-raylib::Shader global::loadAndPatchShader(const std::string& shader_path, int light_count) {
+raylib::Shader global::loadAndPatchShader(const std::string& shader_path, int light_count,
+                                          int max_grid_volumes) {
     std::string vertex = loadFile(shader_path + ".vs");
     std::string fragment = loadFile(shader_path + ".fs");
 
-    // Only the light count is patched in. The shadow map samplers and the light
-    // matrices that used to be unrolled here went with the shadow pass: the
-    // shader traces its shadows through the world volume now, which is one
-    // texture however many lights there are.
+    // Two array sizes are patched in, so that neither can drift away from the
+    // constant the C++ side sizes its own arrays by. The shadow map samplers
+    // and light matrices that used to be unrolled here went with the shadow
+    // pass: shadows are traced through the voxel volumes now.
     static const std::regex max_lights_define{R"(#define MAX_LIGHTS x)", std::regex::ECMAScript};
+    static const std::regex max_grid_volumes_define{R"(#define MAX_GRID_VOLUMES x)", std::regex::ECMAScript};
+
     const std::string new_lights_define = "#define MAX_LIGHTS " + std::to_string(light_count);
-    const std::string fragment_patched = std::regex_replace(fragment, max_lights_define, new_lights_define);
+    const std::string new_grid_volumes_define =
+        "#define MAX_GRID_VOLUMES " + std::to_string(max_grid_volumes);
+
+    std::string fragment_patched = std::regex_replace(fragment, max_lights_define, new_lights_define);
+    fragment_patched = std::regex_replace(fragment_patched, max_grid_volumes_define, new_grid_volumes_define);
 
     return LoadShaderFromMemory(vertex.c_str(), fragment_patched.c_str());
 }

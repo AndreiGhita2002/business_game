@@ -21,6 +21,46 @@ Matrix voxel_model_matrix(const VoxelGrid* grid, const ModelInfo& model_info) {
     return MatrixMultiply(model_info.model.transform, transform_to_matrix(world));
 }
 
+BoundingBox voxel_box_bounds(const Matrix matrix, const float size) {
+    BoundingBox box{};
+    bool first = true;
+
+    for (int i = 0; i < 8; ++i) {
+        // The eight corners of the cube, one bit of i per axis
+        const Vector3 corner = Vector3Transform(Vector3{
+            (i & 1) ? size : 0.0f,
+            (i & 2) ? size : 0.0f,
+            (i & 4) ? size : 0.0f,
+        }, matrix);
+
+        if (first) {
+            box.min = corner;
+            box.max = corner;
+            first = false;
+        } else {
+            box.min = Vector3Min(box.min, corner);
+            box.max = Vector3Max(box.max, corner);
+        }
+    }
+    return box;
+}
+
+bool box_casts_onto(const BoundingBox& caster, const BoundingBox& receiver,
+                    const Vector3 direction, const float reach) {
+    // The box the caster sweeps through as its shadow is carried along the
+    // light: where it stands, where its shadow could end, and everything in
+    // between
+    const Vector3 offset = Vector3Scale(direction, reach);
+    const BoundingBox swept{
+        Vector3Min(caster.min, Vector3Add(caster.min, offset)),
+        Vector3Max(caster.max, Vector3Add(caster.max, offset)),
+    };
+
+    return swept.min.x <= receiver.max.x && swept.max.x >= receiver.min.x
+        && swept.min.y <= receiver.max.y && swept.max.y >= receiver.min.y
+        && swept.min.z <= receiver.max.z && swept.max.z >= receiver.min.z;
+}
+
 bool voxel_ray_blocked(VoxelGrid* grid, const Vector3 origin, const Vector3 dir, const int max_steps) {
     if (grid == nullptr) return false;
 

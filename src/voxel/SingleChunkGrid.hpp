@@ -25,6 +25,9 @@ public:
     void update_models() override;
     std::vector<ModelInfo*> get_models() override;
     bool in_bounds(Int3 grid_pos) const override;
+
+    // A single chunk is exactly what a brick of the shadow atlas holds
+    const VoxelChunk* get_volume_chunk() const override { return &data; }
     bool model_to_grid(const ModelInfo* model, Vector3 local_pos, Int3* out) override;
 
     /**

@@ -95,6 +95,16 @@ public:
     Transform transform;
     VoxelColourMap voxel_colours;
 
+    // Where this grid's voxels sit in the shadow atlas, which is what lets it
+    // cast a shadow and shadow itself, or -1 (VoxelBrickAtlas::NO_SLOT) while
+    // it has none. A VoxelMap does not use this: its voxels go in the world
+    // volume instead, as they are far too many for one brick.
+    int volume_slot = -1;
+    // Whether those voxels have changed since they were last uploaded. A flag
+    // of its own rather than the meshing one, as the two are cleared by
+    // different calls.
+    bool volume_dirty = true;
+
     // What a saved file carries in its readable header. Empty for a grid that
     // was built in code and never saved or loaded. See VoxelFile.hpp.
     std::string name;
@@ -237,6 +247,13 @@ public:
      * write was refused.
      */
     bool set_voxel(Int3 grid_pos, VoxelID id);
+
+    /**
+     * The grid's voxels as a single chunk, to be put in the shadow atlas, or
+     * nullptr when the grid does not fit in one brick. A VoxelMap is the one
+     * that does not: it has the world volume instead.
+     */
+    virtual const VoxelChunk* get_volume_chunk() const { return nullptr; }
 
     /** Whether a coordinate is inside this grid at all. */
     virtual bool in_bounds(Int3 grid_pos) const = 0;

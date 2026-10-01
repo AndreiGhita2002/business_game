@@ -46,7 +46,7 @@ Matrix voxel_model_matrix(const VoxelGrid* grid, const ModelInfo& model_info);
  * This is the same walk the lighting shader does for a shadow ray, kept here in
  * C++ because a shader cannot be unit tested: the awkward cases (a ray along an
  * axis, a ray starting exactly on a face, a ray leaving the world) are the same
- * in both. The two have to be changed together - see volume_blocked() in
+ * in both. The two have to be changed together - see march_volume() in
  * resources/shaders/lighting.fs.
  *
  * A ray that starts outside the grid is not carried to it first, which is the
@@ -56,6 +56,27 @@ Matrix voxel_model_matrix(const VoxelGrid* grid, const ModelInfo& model_info);
  *        false, the same cap the shader has.
  */
 bool voxel_ray_blocked(VoxelGrid* grid, Vector3 origin, Vector3 dir, int max_steps = 256);
+
+/**
+ * The world space box that the cube of `size` voxels a grid or model is built
+ * in fills once `matrix` has been applied to it.
+ *
+ * Every corner goes through the matrix and the result is the box around all
+ * eight, so a turned grid gives the box its corners reach rather than a box
+ * that has been turned.
+ */
+BoundingBox voxel_box_bounds(Matrix matrix, float size);
+
+/**
+ * Whether `caster` could throw a shadow onto `receiver` with the light
+ * travelling along `direction`, within `reach` world units.
+ *
+ * The caster's box is dragged along the direction and the two boxes are tested
+ * for overlap, so the answer is "no" or "maybe": it is there to keep a volume
+ * out of a draw call's shadow list, never to decide what is actually in shadow.
+ */
+bool box_casts_onto(const BoundingBox& caster, const BoundingBox& receiver,
+                    Vector3 direction, float reach);
 
 /**
  * Does a ray cast and returns the closest voxel model on the line.

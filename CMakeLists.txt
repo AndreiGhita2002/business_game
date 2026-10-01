@@ -93,6 +93,8 @@ add_library(business_game_lib STATIC
         src/ui/VoxelEditor.hpp
         src/voxel/SingleChunkGrid.cpp
         src/voxel/SingleChunkGrid.hpp
+        src/voxel/VoxelBrickAtlas.cpp
+        src/voxel/VoxelBrickAtlas.hpp
         src/voxel/VoxelFile.cpp
         src/voxel/VoxelFile.hpp
         src/voxel/VoxelGrid.cpp

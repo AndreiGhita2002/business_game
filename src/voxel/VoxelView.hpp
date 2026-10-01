@@ -9,16 +9,25 @@
 
 #include "game/Light.hpp"
 #include "game/ViewNode.hpp"
+#include "voxel/VoxelBrickAtlas.hpp"
 #include "voxel/VoxelGrid.hpp"
 #include "voxel/VoxelMap.hpp"
 #include "voxel/VoxelVolume.hpp"
 
 #define VOXEL_VIEW_STR "VoxelView"
 
-// The texture unit the world volume is bound to. raylib hands out units from 0
-// upwards to a material's own maps as it draws a model, so this sits above
-// anything it will use.
+// The texture units the two shadow volumes are bound to. raylib hands out units
+// from 0 upwards to a material's own maps as it draws a model, so these sit
+// above anything it will use.
 #define WORLD_VOLUME_TEXTURE_UNIT 12
+#define GRID_ATLAS_TEXTURE_UNIT 13
+
+// How many grid volumes one draw call can be traced against. Patched into the
+// shader as MAX_GRID_VOLUMES by global::loadAndPatchShader(), so the two cannot
+// drift apart. A model with more casters reaching it than this keeps the ones
+// that come first in voxel_grids and loses the rest, which is only a problem
+// once there are more vehicles crowded around one chunk than this allows.
+#define MAX_GRID_VOLUMES 8
 
 class VoxelView : public ViewNode {
 public:
@@ -26,10 +35,13 @@ public:
     VoxelMap* game_map;
 
     // The map's voxels on the GPU, which is what the lighting shader walks when
-    // it traces a shadow ray. Only the map is in it: a grid with a transform of
-    // its own needs a volume of its own, which is a later step, so a vehicle
-    // neither casts a shadow nor shadows itself yet.
+    // it traces a shadow ray.
     VoxelVolume world_volume;
+
+    // Every other grid's voxels, a brick each. These are traced after the world
+    // volume, so a vehicle casts a shadow onto the terrain, onto other
+    // vehicles, and onto itself.
+    VoxelBrickAtlas grid_atlas;
 
     raylib::Camera camera;
     raylib::Shader* voxel_shader;
@@ -48,11 +60,21 @@ public:
     // Helper Functions
     bool isInRenderDistance(Vector3 v) const;
 
+    /**
+     * Hands an atlas slot back, called by ~VoxelGrid as a grid goes away. The
+     * grid holds the slot, so this is the one way back into the atlas.
+     */
+    void release_grid_volume(int slot);
+
 private:
-    // Where the world volume's uniforms sit in the shader, looked up once
+    // Where the volume uniforms sit in the shader, looked up once
     int volume_loc{-1};
     int world_to_volume_loc{-1};
     int volume_size_loc{-1};
+    int grid_atlas_loc{-1};
+    int grid_volume_count_loc{-1};
+    int grid_volume_matrix_loc[MAX_GRID_VOLUMES]{};
+    int grid_volume_origin_loc[MAX_GRID_VOLUMES]{};
 
     // Update Functions, called every tick
     void updateCamera();
@@ -66,8 +88,12 @@ private:
     void drawVoxelModel(const VoxelGrid* grid, const ModelInfo& model_info);
     void drawLightMarkers() const;
 
-    // Puts the world volume and its uniforms on the shader for this frame
+    // Puts the volumes and their uniforms on the shader for this frame
     void bindWorldVolume() const;
+
+    // Picks the grids whose shadows could land on this model and sends them,
+    // so that a fragment only traces the few volumes that could reach it
+    void sendGridVolumes(const VoxelGrid* receiver, const ModelInfo& model_info);
 };
 
 

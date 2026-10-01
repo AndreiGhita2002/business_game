@@ -8,8 +8,17 @@
 #include <raymath.h>
 
 #include "game/Transform.hpp"
+#include "voxel/VoxelView.hpp"
 
 VoxelGrid::~VoxelGrid() {
+    // Hand the atlas slot back, or the bricks fill up with grids that are gone
+    // and the next vehicle built finds no room to cast a shadow from. A grid
+    // made without a view - every grid in the tests - never had one.
+    if (view != nullptr && volume_slot >= 0) {
+        view->release_grid_volume(volume_slot);
+        volume_slot = -1;
+    }
+
     // The children outlive their parent, so each keeps the place it was in
     // rather than snapping back to wherever its local transform alone points
     for (VoxelGrid* child : children) {
@@ -102,7 +111,12 @@ bool VoxelGrid::set_voxel(const Int3 grid_pos, const VoxelID id) {
                  grid_pos.x, grid_pos.y, grid_pos.z);
         return false;
     }
-    return write_voxel(grid_pos, id);
+    if (!write_voxel(grid_pos, id)) return false;
+
+    // The voxels the shadow rays are traced against have moved on too. A
+    // VoxelMap tracks this per chunk as well, for the world volume.
+    volume_dirty = true;
+    return true;
 }
 
 // --- Attachment ---

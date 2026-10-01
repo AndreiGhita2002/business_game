@@ -31,7 +31,8 @@ namespace global {
     static void shutdown();
 
     std::string loadFile(const std::string& path);
-    raylib::Shader loadAndPatchShader(const std::string& shader_path, int light_count);
+    raylib::Shader loadAndPatchShader(const std::string& shader_path, int light_count,
+                                      int max_grid_volumes);
 }
 
 // The transform maths lives in game/Transform.hpp and the ray casts in
