@@ -107,6 +107,8 @@ add_library(business_game_lib STATIC
         src/voxel/VoxelView.hpp
         src/voxel/VoxelVolume.cpp
         src/voxel/VoxelVolume.hpp
+        src/game/Script.cpp
+        src/game/Script.hpp
 )
 
 # PUBLIC, so that both the game and the tests inherit them

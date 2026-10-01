@@ -387,6 +387,27 @@ point into a grid coordinate and `VoxelGrid::set_voxel` writes it and marks the
 right chunk for remeshing. Model space is the mesher's space: X is grid x, Y is
 grid z (up), Z is grid y.
 
+### Scripts
+
+`src/game/Script.cpp/hpp` - in-game behaviour run once per frame.
+
+- `Script` is an abstract base with `on_start()`, `on_update(float delta)`
+  (seconds, from `GetFrameTime()`) and `get_type()`.
+- Scripts are owned globally, in `global::scripts` in `main.hpp`, and are not
+  attached to anything: a script that acts on a grid or a light holds its own
+  pointer to it. Add one with `global::add_script()`, which stores it and calls
+  `on_start()`.
+- `mainLoop()` runs every script before `root_view->update()`, so what a script
+  changes is seen by that same frame's update and draw. `shutdown()` clears the
+  scripts before the view tree, as they may point into it.
+- `LambdaScript` wraps an update lambda (and optionally a start one) for
+  behaviour too small for its own class. Its state lives in the captures, so it
+  can never be saved.
+- Saving script state is not done yet (TODO in `Script.hpp`); the plan is a
+  write/read pair plus a loader registry keyed on `get_type()`, like the grid
+  loaders.
+- `main.cpp` adds a test script that spins the small grid (`voxel_grids[1]`).
+
 ### Entry Point
 
 `src/game/main.cpp` - Initializes 1600x900 window, sets up shader pipeline, runs 60 FPS main loop. Supports Emscripten/WebAssembly compilation. `mainLoop()` owns the frame's single `BeginDrawing()`/`EndDrawing()` block, so views draw in tree order (3D first, UI on top) - individual ViewNodes must never open their own drawing block.

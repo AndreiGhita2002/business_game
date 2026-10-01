@@ -132,6 +132,22 @@ void global::init() {
     // grid to pick at once. Each switches the other off as it is armed, which
     // is what these hooks are for - neither knows the other exists, and this is
     // the one place they meet.
+    // A test script: spin the small grid about its up axis. The grid is the
+    // second one the VoxelView made, after the map. The VoxelView owns it, and
+    // the scripts are cleared before the view tree in shutdown(), so the
+    // pointer never outlives it.
+    VoxelGrid* small_grid = voxel_view->voxel_grids[1];
+    add_script(std::make_unique<LambdaScript>("spin small grid", [small_grid](float delta) {
+        constexpr float TURNS_PER_SECOND = 0.25f;
+        // Model space Y is up (grid z). Normalised every frame so the rounding
+        // in a long run of multiplications cannot drift it off a unit quaternion.
+        const Quaternion step = QuaternionFromAxisAngle(
+            Vector3{0.0f, 1.0f, 0.0f}, TURNS_PER_SECOND * 2.0f * PI * delta);
+        Transform t = small_grid->get_transform();
+        t.rotation = QuaternionNormalize(QuaternionMultiply(step, t.rotation));
+        small_grid->set_transform(t);
+    }));
+
     transform_menu->on_activate = [editor] {
         editor->select(NO_VOXEL_SELECTION);
     };
@@ -153,6 +169,9 @@ void global::shutdown() {
     // that was freed the first time round. That was the double free on
     // shutdown. raylib::Shader::Unload() is no use either: it tests the same
     // stale locs and leaves it just as stale.
+    // Scripts go first, as they may hold pointers into the view tree.
+    scripts.clear();
+
     UnloadShader(voxel_shader);
     voxel_shader.locs = nullptr;
     voxel_shader.id = 0;
@@ -165,7 +184,12 @@ void global::shutdown() {
 }
 
 void global::mainLoop() {
-    root_view->update(GetFrameTime());
+    const float delta = GetFrameTime();
+
+    for (const auto& script : scripts) {
+        script->on_update(delta);
+    }
+    root_view->update(delta);
 
     // The whole frame is drawn inside a single Begin/EndDrawing block, so that
     // every ViewNode draws in tree order: the voxel scene first, the UI on top.
@@ -174,6 +198,13 @@ void global::mainLoop() {
         root_view->render();
     }
     EndDrawing();
+}
+
+Script* global::add_script(std::unique_ptr<Script> script) {
+    Script* added = script.get();
+    scripts.push_back(std::move(script));
+    added->on_start();
+    return added;
 }
 
 std::string global::loadFile(const std::string& path) {

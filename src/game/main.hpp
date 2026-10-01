@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "ViewNode.hpp"
+#include "game/Script.hpp"
 #include "game/Picking.hpp"
 #include "game/Transform.hpp"
 #include "ui/VoxelEditor.hpp"
@@ -25,10 +26,17 @@ namespace global {
 
     inline std::unique_ptr<ViewNode> root_view;
 
+    // Every running script, updated in order once per frame before the view
+    // tree. Add them through add_script() so that they are started.
+    inline std::vector<std::unique_ptr<Script>> scripts;
+
     // Main Functions, only called inside main
     static void init();
     static void mainLoop();
     static void shutdown();
+
+    /** Takes the script, starts it, and runs it every frame from then on. */
+    Script* add_script(std::unique_ptr<Script> script);
 
     std::string loadFile(const std::string& path);
     raylib::Shader loadAndPatchShader(const std::string& shader_path, int light_count,
