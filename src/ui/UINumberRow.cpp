@@ -16,9 +16,9 @@ std::string& UINumberRow::get_view_type() {
 
 UINumberRow::UINumberRow(ViewNode* parent, std::string label, float* value,
                          const float step, const float min_value, const float max_value,
-                         const int decimals, const Rectangle bounds)
+                         const int decimals, const Rectangle bounds, const bool wrap_around)
     : UINode(parent, bounds), label(std::move(label)), value(value), step(step),
-      min_value(min_value), max_value(max_value), decimals(decimals)
+      min_value(min_value), max_value(max_value), decimals(decimals), wrap_around(wrap_around)
 {
     const float minus_x = NUMBER_ROW_LABEL_WIDTH + NUMBER_ROW_GAP;
     const float plus_x = minus_x + NUMBER_ROW_BUTTON_WIDTH + NUMBER_ROW_GAP
@@ -38,7 +38,15 @@ UINumberRow::UINumberRow(ViewNode* parent, std::string label, float* value,
 void UINumberRow::step_by(const float amount) {
     if (value == nullptr) return;
 
-    *value = std::clamp(*value + step * amount, min_value, max_value);
+    if (wrap_around) {
+        *value += step * amount;
+        if (*value > max_value) {
+            *value -= max_value;
+        }
+    } else {
+        *value = std::clamp(*value + step * amount, min_value, max_value);
+    }
+
     if (on_change) on_change();
 }
 

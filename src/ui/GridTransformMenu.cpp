@@ -202,7 +202,7 @@ void GridTransformMenu::add_row(const int index, std::string label, float* value
             0.0f,
             static_cast<float>(index) * (NUMBER_ROW_HEIGHT + NUMBER_ROW_GAP),
             0.0f, 0.0f
-        });
+        }, true);
     // Every row pushes the whole transform, as a Transform is written in one go
     row->on_change = [this] { apply_transform_to_grid(); };
     rows->add_child(std::move(row));

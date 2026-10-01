@@ -38,6 +38,8 @@ public:
     float max_value;
     // Digits printed after the point
     int decimals;
+    // If the value should 'wrap around' when '+' is pressed at max_value.
+    bool wrap_around;
 
     // Run after the value changes, for pushing it wherever it needs to go
     std::function<void()> on_change;
@@ -55,7 +57,8 @@ public:
 
     UINumberRow(ViewNode* parent, std::string label, float* value,
                 float step, float min_value, float max_value,
-                int decimals = 2, Rectangle bounds = Rectangle{});
+                int decimals = 2, Rectangle bounds = Rectangle{},
+                bool wrap_around = false);
 };
 
 #endif //BUSINESS_GAME_UINUMBERROW_HPP
