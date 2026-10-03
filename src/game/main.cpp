@@ -21,6 +21,7 @@
 #include "ui/UIImage.hpp"
 #include "ui/ShaderMenu.hpp"
 #include "ui/GridTransformMenu.hpp"
+#include "ui/VehiclePanel.hpp"
 
 #if defined(PLATFORM_WEB)
     #include <emscripten/emscripten.h>
@@ -33,6 +34,27 @@ constexpr float UI_MARGIN = 16.0f;
 constexpr float UI_BUTTON_HEIGHT = 32.0f;
 constexpr float UI_BUTTON_GAP = 8.0f;
 
+// The most ticks one frame will run. A frame that falls further behind than
+// this (a breakpoint, the window being dragged) drops the time instead of
+// trying to catch up, which would only make the next frame later still.
+constexpr int MAX_TICKS_PER_FRAME = 5;
+
+// The simulation's seed. Nothing random happens in it yet.
+constexpr uint64_t SIMULATION_SEED = 1;
+
+/**
+ * Queues the test scenario for the architecture slice: two loops of road over
+ * the map and a dozen cars on them at different speeds, two running their loop
+ * backwards. Goes through the command queue like anything else would, so the
+ * setup runs at tick 0 and the cars spawn at tick 1, once the routes exist.
+ *
+ * The routes follow the terrain: every point takes its height from the top of
+ * the map's column there. That reads the voxels, which the simulation must
+ * never do, but this is not the simulation - it is input, worked out before
+ * the command is made, and the command only carries plain numbers.
+ */
+static void queue_test_scenario(VoxelMap* map);
+
 void global::init() {
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
     raylib::Window::Init(1600, 900, "business game");
@@ -43,6 +65,7 @@ void global::init() {
     SetExitKey(KEY_NULL);
 
     root_view = std::make_unique<ViewNode>(nullptr);
+    simulation = std::make_unique<sim::Simulation>(SIMULATION_SEED);
 
     voxel_shader = loadAndPatchShader("../resources/shaders/lighting", 2, MAX_GRID_VOLUMES);
     voxel_shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(voxel_shader, "viewPos");
@@ -53,7 +76,16 @@ void global::init() {
 
     // Voxels
     root_view->add_child(std::make_unique<VoxelView>(root_view.get(), &voxel_shader));
-    auto voxel_view = static_cast<VoxelView *>(root_view->child.get());
+    voxel_view = static_cast<VoxelView *>(root_view->child.get());
+
+    // The simulation's vehicles, made visible. Every asset is put on the map's
+    // colours, and the placeholder cars come in three of them.
+    assets = std::make_unique<AssetRegistry>(voxel_view->game_map->voxel_colours);
+    assets->register_builder("car.maroon", placeholder_car_builder(10), PLACEHOLDER_CAR_PIVOT);
+    assets->register_builder("car.blue", placeholder_car_builder(4), PLACEHOLDER_CAR_PIVOT);
+    assets->register_builder("car.orange", placeholder_car_builder(5), PLACEHOLDER_CAR_PIVOT);
+    entities = std::make_unique<EntityManager>(voxel_view, assets.get(), voxel_view);
+    queue_test_scenario(voxel_view->game_map);
 
     // UI
     // Added after the VoxelView, so it ends up as its sibling and is rendered
@@ -69,6 +101,21 @@ void global::init() {
     title->font_size = 32.0f;
     title->background = ui_view->style.background;
     ui_view->add_child(std::move(title));
+
+    // What the simulation is doing, under the title: the tick, how many ticks
+    // the last frame ran, and how many vehicles exist against how many are
+    // drawn, which is the realise radius at work
+    auto sim_readout_node = std::make_unique<UILabel>(ui_view, "",
+        Rectangle{0.0f, 54.0f, 0.0f, 0.0f}, Anchor::TOP_CENTER);
+    auto sim_readout = sim_readout_node.get();
+    sim_readout->font_size = 16.0f;
+    sim_readout->background = ui_view->style.background;
+    ui_view->add_child(std::move(sim_readout_node));
+    add_script(std::make_unique<LambdaScript>("simulation readout", [sim_readout](float) {
+        sim_readout->text = TextFormat("tick %llu  |  %d ticks this frame  |  %zu vehicles, %zu drawn",
+            static_cast<unsigned long long>(simulation->tick()), ticks_last_frame,
+            simulation->vehicles().size(), entities->realized_count());
+    }));
 
     // Debug panel for the lighting, hidden until F3 or until its button is
     // pressed. It sits under that button, in the top left.
@@ -108,10 +155,19 @@ void global::init() {
     };
 
     // U
-    add_bottom_left_button("Toggle Sun", [voxel_view] {
+    add_bottom_left_button("Toggle Sun", [] {
         Light& sun = voxel_view->lights[voxel_view->sun_light_id];
         sun.enabled = !sun.enabled;
     });
+
+    // The selected vehicle, under the readout. Added before the menus below so
+    // that it is updated before them: a click that arms one of them is then
+    // seen by this panel while that tool still counts as idle, and the panel
+    // checks world_click_taken on every later click.
+    auto vehicle_panel_node = std::make_unique<VehiclePanel>(ui_view, voxel_view, entities.get(),
+                                                             simulation.get(), &commands);
+    auto vehicle_panel = vehicle_panel_node.get();
+    ui_view->add_child(std::move(vehicle_panel_node));
 
     // Moving and turning a grid, on the right edge. Its rows and its attachment
     // buttons only appear once a grid has been picked out of the world: the
@@ -155,6 +211,19 @@ void global::init() {
         transform_menu->cancel();
     };
 
+    // A free click on a car selects it, but only when neither of those two is
+    // waiting on the click for itself
+    vehicle_panel->world_click_taken = [transform_menu, editor] {
+        return transform_menu->is_active() || editor->selected_id != NO_VOXEL_SELECTION;
+    };
+
+    // An entity's grids are deleted when it leaves the camera's range, and
+    // these all hold grid pointers they may still be using
+    voxel_view->add_grid_removal_listener([transform_menu, editor](const std::vector<VoxelGrid*>& removed) {
+        transform_menu->forget_grids(removed);
+        editor->forget_grids(removed);
+    });
+
     TraceLog(LOG_DEBUG, "main init finished!");
 }
 
@@ -172,6 +241,11 @@ void global::shutdown() {
     // Scripts go first, as they may hold pointers into the view tree.
     scripts.clear();
 
+    // Then the entities, while the view they lent their grids to is still
+    // there to take them back. Its destructor deletes whatever is left in it,
+    // which must by then be only its own grids.
+    entities.reset();
+
     UnloadShader(voxel_shader);
     voxel_shader.locs = nullptr;
     voxel_shader.id = 0;
@@ -179,12 +253,35 @@ void global::shutdown() {
     // The view tree is torn down before the window, so that anything it holds
     // on the GPU (UI textures, meshes) is released while the context is alive.
     root_view.reset();
+    voxel_view = nullptr;
+
+    assets.reset();
+    simulation.reset();
 
     raylib::Window::Close();
 }
 
 void global::mainLoop() {
     const float delta = GetFrameTime();
+    const float tick_length = tick_seconds();
+
+    // Fixed ticks out of a frame of whatever length. The accumulator holds the
+    // game time not run yet; every whole tick of it is one step.
+    tick_accumulator += delta * game_speed;
+    int ticks_run = 0;
+    while (tick_accumulator >= tick_length && ticks_run < MAX_TICKS_PER_FRAME) {
+        simulation->step(commands.take(simulation->tick()));
+        entities->on_tick(*simulation);
+        tick_accumulator -= tick_length;
+        ticks_run++;
+    }
+    if (ticks_run == MAX_TICKS_PER_FRAME) tick_accumulator = 0.0f;
+    ticks_last_frame = ticks_run;
+
+    // The entities are drawn the leftover fraction of the way between the
+    // last two ticks, which is what makes 20 ticks a second look smooth
+    entities->present(*simulation, voxel_view->camera.position,
+                      tick_accumulator / tick_length, delta);
 
     for (const auto& script : scripts) {
         script->on_update(delta);
@@ -198,6 +295,72 @@ void global::mainLoop() {
         root_view->render();
     }
     EndDrawing();
+}
+
+static void queue_test_scenario(VoxelMap* map) {
+    // Outside the namespace, but it is setting up global state throughout
+    using namespace global;
+    using sim::Fixed;
+    using sim::Point;
+
+    // One above the highest solid voxel in the column, so the cars stand on
+    // the ground rather than in it
+    const auto ground = [map](const int x, const int y) {
+        for (int z = CHUNK_SIZE - 1; z >= 0; --z) {
+            if (map->is_solid(Int3{x, y, z})) return z + 1;
+        }
+        return 0;
+    };
+
+    // A rectangle through (x0, y0) and (x1, y1), with a point every `step`
+    // voxels along each side. Each point is on the ground, and a car takes its
+    // height from the two points either side of it, so the closer they are
+    // the less it cuts through the bumps in between.
+    const auto loop = [&ground](const int x0, const int y0, const int x1, const int y1, const int step) {
+        std::vector<Point> points;
+        const auto add = [&](const int x, const int y) {
+            points.push_back(Point{Fixed::from_int(x), Fixed::from_int(y), Fixed::from_int(ground(x, y))});
+        };
+        for (int x = x0; x < x1; x += step) add(x, y0);
+        for (int y = y0; y < y1; y += step) add(x1, y);
+        for (int x = x1; x > x0; x -= step) add(x, y1);
+        for (int y = y1; y > y0; y -= step) add(x0, y);
+        return points;
+    };
+
+    commands.submit(std::make_unique<sim::AddRoute>(loop(12, 12, 116, 116, 2)));
+    commands.submit(std::make_unique<sim::AddRoute>(loop(40, 40, 88, 72, 2)));
+
+    // The routes do not exist until tick 0 has run, and the queue hands every
+    // command to the next tick, so the cars are queued from a script that
+    // waits for the routes to be announced. It removes nothing and does
+    // nothing once it has fired.
+    add_script(std::make_unique<LambdaScript>("spawn test cars", [fired = false](float) mutable {
+        if (fired || simulation->routes().size() < 2) return;
+        fired = true;
+
+        // Route handles in the order they were added. Nothing else adds
+        // routes, so walking the pool gives exactly these two.
+        std::vector<sim::RouteId> routes;
+        simulation->routes().for_each([&routes](const sim::RouteId id, const sim::Route&) {
+            routes.push_back(id);
+        });
+
+        const char* colours[] = {"car.maroon", "car.blue", "car.orange"};
+        // Outer loop: eight cars spread round it at 2 to 5.5 voxels a second
+        const Fixed outer_length = simulation->routes().get(routes[0])->length();
+        for (int i = 0; i < 8; ++i) {
+            commands.submit(std::make_unique<sim::SpawnVehicle>(
+                routes[0], outer_length * i / 8, Fixed::from_ratio(4 + i, 40), colours[i % 3]));
+        }
+        // Inner loop: four cars, the last two going round the other way
+        const Fixed inner_length = simulation->routes().get(routes[1])->length();
+        for (int i = 0; i < 4; ++i) {
+            const Fixed speed = Fixed::from_ratio(3 + i, 40);
+            commands.submit(std::make_unique<sim::SpawnVehicle>(
+                routes[1], inner_length * i / 4, i < 2 ? speed : -speed, colours[(i + 1) % 3]));
+        }
+    }));
 }
 
 Script* global::add_script(std::unique_ptr<Script> script) {
@@ -243,7 +406,8 @@ int main() {
     global::init();
 
 #if defined(PLATFORM_WEB)
-    emscripten_set_main_loop(global::mainLoop(), 0, 1);
+    // The function itself, not a call to it
+    emscripten_set_main_loop(global::mainLoop, 0, 1);
 #else
     SetTargetFPS(60);
 

@@ -55,6 +55,30 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+# === The simulation ===
+# The game's single source of truth, kept apart from everything that draws it.
+# It links nothing but the standard library and has no raylib on its include
+# path, so anything under src/sim that pulls in raylib - directly, or through a
+# voxel/ or ui/ header - fails to compile. That is the boundary between the
+# simulation and the presentation, enforced rather than agreed on.
+add_library(business_game_sim STATIC
+        src/sim/Command.cpp
+        src/sim/Command.hpp
+        src/sim/Event.hpp
+        src/sim/Fixed.hpp
+        src/sim/Handle.hpp
+        src/sim/Pool.hpp
+        src/sim/Rng.hpp
+        src/sim/Routes.cpp
+        src/sim/Routes.hpp
+        src/sim/Serial.hpp
+        src/sim/Simulation.cpp
+        src/sim/Simulation.hpp
+        src/sim/Vehicles.cpp
+        src/sim/Vehicles.hpp
+)
+target_include_directories(business_game_sim PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 # === The game, as a library ===
 # Everything except main() lives here, so that the test binary can link the same
 # code the game runs. Anything added to the game goes in this list, not in the
@@ -109,6 +133,19 @@ add_library(business_game_lib STATIC
         src/voxel/VoxelVolume.hpp
         src/game/Script.cpp
         src/game/Script.hpp
+        src/entity/AssetRegistry.cpp
+        src/entity/AssetRegistry.hpp
+        src/entity/Entity.cpp
+        src/entity/Entity.hpp
+        src/entity/EntityManager.cpp
+        src/entity/EntityManager.hpp
+        src/entity/GridSink.hpp
+        src/entity/SimConvert.cpp
+        src/entity/SimConvert.hpp
+        src/entity/VehicleEntity.cpp
+        src/entity/VehicleEntity.hpp
+        src/ui/VehiclePanel.cpp
+        src/ui/VehiclePanel.hpp
 )
 
 # PUBLIC, so that both the game and the tests inherit them
@@ -117,7 +154,7 @@ target_include_directories(business_game_lib PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${raygui_SOURCE_DIR}/src
 )
-target_link_libraries(business_game_lib PUBLIC raylib raylib_cpp)
+target_link_libraries(business_game_lib PUBLIC business_game_sim raylib raylib_cpp)
 
 # macOS frameworks
 if(APPLE)
@@ -168,12 +205,28 @@ if(BUSINESS_GAME_BUILD_TESTS)
 
     enable_testing()
 
+    # The simulation's tests are a binary of their own, linked against the
+    # simulation library and Catch2 and nothing else. That it links at all is
+    # the proof that the simulation needs nothing from the game side.
+    add_executable(business_game_sim_tests
+            src/tests/sim/test_sim_core.cpp
+            src/tests/sim/test_sim_determinism.cpp
+            src/tests/sim/test_sim_routes.cpp
+            src/tests/sim/test_sim_simulation.cpp
+    )
+    target_link_libraries(business_game_sim_tests PRIVATE
+            business_game_sim
+            Catch2::Catch2WithMain
+    )
+
     # The tests only cover what can run without a window: the transform maths,
     # the grid hierarchy and attachment, and the file format. Anything that
     # meshes, draws or reads input needs an OpenGL context and is left out.
     add_executable(business_game_tests
             src/tests/TestHelpers.hpp
             src/tests/test_attachment.cpp
+            src/tests/test_entity_manager.cpp
+            src/tests/test_sim_convert.cpp
             src/tests/test_transform.cpp
             src/tests/test_voxel_file.cpp
             src/tests/test_voxel_mesh.cpp
@@ -189,4 +242,13 @@ if(BUSINESS_GAME_BUILD_TESTS)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)
     catch_discover_tests(business_game_tests)
+    catch_discover_tests(business_game_sim_tests)
+
+    # The simulation has to come out the same on every machine, and hardware
+    # fractional maths is the most likely way for that to quietly stop being
+    # true. Crude, but it costs nothing: fails if either keyword turns up
+    # anywhere under src/sim, comments included.
+    add_test(NAME sim_uses_no_floating_point
+             COMMAND ${CMAKE_COMMAND} -DSIM_DIR=${CMAKE_CURRENT_SOURCE_DIR}/src/sim
+                     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckSimNoFloats.cmake)
 endif()

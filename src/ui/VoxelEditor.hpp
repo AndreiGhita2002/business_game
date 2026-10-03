@@ -83,6 +83,9 @@ public:
 
     void select(int voxel_id);
 
+    /** Lets go of any of these grids, which are about to be deleted. */
+    void forget_grids(const std::vector<VoxelGrid*>& grids);
+
     VoxelEditor(ViewNode* parent, VoxelView* voxel_view);
 
 private:

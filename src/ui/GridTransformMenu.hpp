@@ -116,6 +116,13 @@ public:
      */
     void cancel();
 
+    /**
+     * Lets go of any of these grids, which are about to be deleted: a selected
+     * one is deselected, and the attachment buttons are told as well. Hooked
+     * to VoxelView::add_grid_removal_listener() by whoever builds the UI.
+     */
+    void forget_grids(const std::vector<VoxelGrid*>& grids);
+
     // @param voxel_view: the view holding the grids this menu moves
     GridTransformMenu(ViewNode* parent, VoxelView* voxel_view);
 
@@ -126,8 +133,9 @@ private:
     GridTransformStage stage;
 
     // The grid the rows write to, or nullptr while nothing is selected. Raw and
-    // not owned: it is only valid for as long as the grid is, which is for the
-    // whole run today, as nothing destroys a grid once the scene is built.
+    // not owned: it is only valid for as long as the grid is. Grids do go away
+    // now - an entity's are deleted when it leaves the camera's range - and
+    // forget_grids() is what clears this before that happens.
     VoxelGrid* selected_grid;
 
     // The rows, owned by the ViewNode child chain like every other element.

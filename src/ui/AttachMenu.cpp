@@ -4,6 +4,7 @@
 
 #include "AttachMenu.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <raymath.h>
@@ -84,6 +85,24 @@ void AttachMenu::cancel() {
     target_model = nullptr;
     connector_grid = nullptr;
     connector_model = nullptr;
+}
+
+void AttachMenu::forget_grids(const std::vector<VoxelGrid*>& grids) {
+    const auto removed = [&grids](const VoxelGrid* g) {
+        return g != nullptr && std::find(grids.begin(), grids.end(), g) != grids.end();
+    };
+
+    if (removed(target_grid) || removed(connector_grid)) cancel();
+
+    // Rebuilt every frame anyway, but a frame can be drawn before the next
+    // rebuild, so they go now
+    for (const AttachmentLink& link : links) {
+        if (removed(link.grid)) {
+            links.clear();
+            has_links = false;
+            break;
+        }
+    }
 }
 
 void AttachMenu::begin_attach() {

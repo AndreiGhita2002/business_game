@@ -19,6 +19,14 @@ public:
 
     explicit SingleChunkGrid(VoxelView* view, const VoxelColourMap &voxel_colours);
 
+    /**
+     * Frees the model's GPU buffers. Nothing deleted these grids before
+     * entities did, and an entity's grids are deleted every time it leaves the
+     * camera's range. A grid that was never meshed - every grid in the tests -
+     * has nothing to free and makes no GL call.
+     */
+    ~SingleChunkGrid() override;
+
     std::string& get_grid_type() override;
     Int2 get_size() override;
     VoxelID *get_voxel(Int3 grid_pos) override;

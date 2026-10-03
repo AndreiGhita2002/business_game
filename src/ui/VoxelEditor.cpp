@@ -4,6 +4,7 @@
 
 #include "VoxelEditor.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <raymath.h>
 #include <rlgl.h>
@@ -154,6 +155,13 @@ void VoxelEditor::update(const float delta_time) {
     }
 
     ViewNode::update(delta_time);
+}
+
+void VoxelEditor::forget_grids(const std::vector<VoxelGrid*>& grids) {
+    if (target_grid != nullptr && std::find(grids.begin(), grids.end(), target_grid) != grids.end()) {
+        has_target = false;
+        target_grid = nullptr;
+    }
 }
 
 void VoxelEditor::update_target() {

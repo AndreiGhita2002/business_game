@@ -6,7 +6,9 @@
 #define BUSINESS_GAME_VOXELVIEW_HPP
 #include <Camera3D.hpp>
 #include <Shader.hpp>
+#include <functional>
 
+#include "entity/GridSink.hpp"
 #include "game/Light.hpp"
 #include "game/ViewNode.hpp"
 #include "voxel/VoxelBrickAtlas.hpp"
@@ -29,8 +31,18 @@
 // once there are more vehicles crowded around one chunk than this allows.
 #define MAX_GRID_VOLUMES 8
 
-class VoxelView : public ViewNode {
+/**
+ * Called with the grids that are about to stop being drawn and be deleted, so
+ * anything holding a pointer to one (a menu's selection, say) can let go.
+ */
+using GridRemovalListener = std::function<void(const std::vector<VoxelGrid*>& removed)>;
+
+class VoxelView : public ViewNode, public GridSink {
 public:
+    // Every grid that is updated and drawn. The map and the test grid made in
+    // the constructor are this view's own and are deleted with it; an entity's
+    // grids belong to the entity, which hands them in and takes them back out
+    // through the GridSink calls below.
     std::vector<VoxelGrid*> voxel_grids;
     VoxelMap* game_map;
 
@@ -57,6 +69,20 @@ public:
 
     VoxelView(ViewNode* parent, raylib::Shader* shader);
 
+    /**
+     * Deletes the grids still in voxel_grids, which by then should only be the
+     * view's own: everything that lent it grids (the entities) has to be gone
+     * first, see global::shutdown().
+     */
+    ~VoxelView() override;
+
+    // --- GridSink ---
+    void add_grids(const std::vector<VoxelGrid*>& grids) override;
+    /** Tells every removal listener first, then forgets the grids. Does not delete them. */
+    void remove_grids(const std::vector<VoxelGrid*>& grids) override;
+
+    void add_grid_removal_listener(GridRemovalListener listener);
+
     // Helper Functions
     bool isInRenderDistance(Vector3 v) const;
 
@@ -67,6 +93,8 @@ public:
     void release_grid_volume(int slot);
 
 private:
+    std::vector<GridRemovalListener> removal_listeners;
+
     // Where the volume uniforms sit in the shader, looked up once
     int volume_loc{-1};
     int world_to_volume_loc{-1};

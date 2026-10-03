@@ -4,6 +4,7 @@
 
 #include "VoxelView.hpp"
 
+#include <algorithm>
 #include <rlgl.h>
 
 #include "game/main.hpp"
@@ -289,6 +290,34 @@ VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader)
     single_chunk_grid->transform.scale = Vector3(1.0f, 1.0f, 1.0f);
     single_chunk_grid->was_updated = true;
     voxel_grids.emplace_back(single_chunk_grid);
+}
+
+VoxelView::~VoxelView() {
+    // Children before parents, the reverse of the order they were added in.
+    // Either order would be safe, as a grid's destructor unhooks it from both
+    // ends of the tree, but this way nothing is re-parented on its way out.
+    // Each destructor also hands its atlas slot back, and grid_atlas is a
+    // member, so it is still alive while this body runs.
+    for (auto it = voxel_grids.rbegin(); it != voxel_grids.rend(); ++it) delete *it;
+    voxel_grids.clear();
+    game_map = nullptr;
+}
+
+void VoxelView::add_grids(const std::vector<VoxelGrid*>& grids) {
+    voxel_grids.insert(voxel_grids.end(), grids.begin(), grids.end());
+}
+
+void VoxelView::remove_grids(const std::vector<VoxelGrid*>& grids) {
+    // Before the grids are forgotten, while every pointer is still good
+    for (const GridRemovalListener& listener : removal_listeners) listener(grids);
+
+    std::erase_if(voxel_grids, [&grids](const VoxelGrid* g) {
+        return std::find(grids.begin(), grids.end(), g) != grids.end();
+    });
+}
+
+void VoxelView::add_grid_removal_listener(GridRemovalListener listener) {
+    removal_listeners.push_back(std::move(listener));
 }
 
 void VoxelView::drawVoxelScene() {

@@ -38,6 +38,10 @@ VoxelID* SingleChunkGrid::get_voxel(Int3 grid_pos) {
         + grid_pos.z * CHUNK_SIZE * CHUNK_SIZE];
 }
 
+SingleChunkGrid::~SingleChunkGrid() {
+    if (model.has_value()) unload_chunk_model(model->model);
+}
+
 void SingleChunkGrid::update_models() {
     // The render distance is a question about the world, so the grid's own
     // transform is not enough: a grid hanging off a moved parent has moved too

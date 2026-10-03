@@ -4,6 +4,7 @@
 
 #include "GridTransformMenu.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -230,6 +231,22 @@ void GridTransformMenu::begin_select() {
 void GridTransformMenu::cancel() {
     stage = GridTransformStage::IDLE;
     if (attach) attach->cancel();
+}
+
+void GridTransformMenu::forget_grids(const std::vector<VoxelGrid*>& grids) {
+    const auto removed = [&grids](const VoxelGrid* g) {
+        return g != nullptr && std::find(grids.begin(), grids.end(), g) != grids.end();
+    };
+
+    if (removed(selected_grid)) {
+        TraceLog(LOG_DEBUG, "[GRIDTRANSFORM] Selected grid is being removed");
+        clear_selection();
+    }
+    if (removed(target_grid)) {
+        has_target = false;
+        target_grid = nullptr;
+    }
+    if (attach) attach->forget_grids(grids);
 }
 
 void GridTransformMenu::clear_selection() {

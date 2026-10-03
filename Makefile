@@ -47,9 +47,9 @@ run: build
 
 # --- The tests ---
 
-# Only the test target is built, so this does not wait for the game to link.
+# Only the test targets are built, so this does not wait for the game to link.
 tests: configure
-	cmake --build $(BUILD_DIR) --target business_game_tests -j $(JOBS)
+	cmake --build $(BUILD_DIR) --target business_game_tests business_game_sim_tests -j $(JOBS)
 	ctest --test-dir $(BUILD_DIR) --output-on-failure $(CTESTFLAGS)
 
 # Because both are worth typing

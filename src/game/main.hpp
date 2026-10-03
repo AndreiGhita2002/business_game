@@ -10,12 +10,16 @@
 #include <vector>
 
 #include "ViewNode.hpp"
+#include "entity/AssetRegistry.hpp"
+#include "entity/EntityManager.hpp"
 #include "game/Script.hpp"
 #include "game/Picking.hpp"
 #include "game/Transform.hpp"
 #include "ui/VoxelEditor.hpp"
 #include "voxel/VoxelView.hpp"
 #include "voxel/VoxelMap.hpp"
+#include "sim/Command.hpp"
+#include "sim/Simulation.hpp"
 
 namespace global {
     inline float render_distance = 128.0f;
@@ -25,6 +29,29 @@ namespace global {
     inline float ambient[4] = {0.06f, 0.06f, 0.06f, 1.0f};
 
     inline std::unique_ptr<ViewNode> root_view;
+    // The view the scene is drawn by, owned by root_view's child chain
+    inline VoxelView* voxel_view = nullptr;
+
+    // --- Simulation ---
+    // The game's state. Read through its const accessors, changed only by
+    // queueing commands on `commands`, which mainLoop() hands to it a tick at
+    // a time. See sim/Simulation.hpp.
+    inline std::unique_ptr<sim::Simulation> simulation;
+    inline sim::CommandQueue commands;
+
+    // Game time not yet run as ticks, in seconds. Presentation state: the
+    // simulation only ever learns "one more tick".
+    inline float tick_accumulator = 0.0f;
+    // How fast game time runs against real time. 0 pauses the simulation.
+    inline float game_speed = 1.0f;
+    // How many ticks the last frame ran, for the debug readout
+    inline int ticks_last_frame = 0;
+
+    // --- Presentation of the simulation ---
+    // What a vehicle's model name looks like, and the entities drawn for the
+    // vehicles near the camera
+    inline std::unique_ptr<AssetRegistry> assets;
+    inline std::unique_ptr<EntityManager> entities;
 
     // Every running script, updated in order once per frame before the view
     // tree. Add them through add_script() so that they are started.

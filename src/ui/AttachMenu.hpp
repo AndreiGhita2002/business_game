@@ -118,6 +118,12 @@ public:
      */
     void cancel();
 
+    /**
+     * Lets go of any of these grids, which are about to be deleted. A half
+     * made attachment that involves one of them is cancelled.
+     */
+    void forget_grids(const std::vector<VoxelGrid*>& grids);
+
     // @param voxel_view: the view holding the grids this menu attaches
     // @param bounds: where the panel sits inside its parent. The width has to
     //                be given, as the buttons are cut from it.

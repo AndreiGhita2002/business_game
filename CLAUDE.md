@@ -46,10 +46,14 @@ build/bin/business_game_tests "[voxelfile]"
 The project uses CMake with FetchContent for dependencies (raylib, raylib-cpp,
 raygui, Catch2).
 
-There are three targets. `business_game_lib` holds everything except `main()`,
-`business_game` is `main.cpp` linked against it, and `business_game_tests` is the
-Catch2 runner linked against the same library. **A new source file goes in the
-library's list, not the executable's** - the executable is only `main.cpp`.
+There are five targets. `business_game_sim` is the simulation (`src/sim`) and
+links nothing but the standard library. `business_game_lib` holds everything
+else except `main()` and links the simulation, `business_game` is `main.cpp`
+linked against it, and two Catch2 runners test them: `business_game_tests`
+against the library, `business_game_sim_tests` against the simulation alone.
+**A new source file goes in a library's list, not the executable's** - the
+executable is only `main.cpp` - and in `business_game_sim` only if it is
+simulation code with no raylib in it.
 
 Pass `-DBUSINESS_GAME_BUILD_TESTS=OFF` to skip building Catch2, which is off
 automatically for a web build.
@@ -57,8 +61,35 @@ automatically for a web build.
 ## Tests
 
 Catch2 v3 (`src/tests/`), one file per area. They run without a window, which is
-what limits what they can cover:
+what limits what they can cover.
 
+The simulation's tests are in `src/tests/sim/` and build into
+`business_game_sim_tests`, which links the simulation library and Catch2 and
+nothing else - that it links at all is part of the proof that the simulation
+needs nothing from the game side:
+
+- `test_sim_core.cpp` - `Fixed`, `Pool` and its handles, `ByteWriter` /
+  `ByteReader`, and `Rng` (pinned to the reference PCG32 output).
+- `test_sim_routes.cpp` - what makes a route, and where a distance lands on one.
+- `test_sim_simulation.cpp` - `step()`: commands in, vehicles moving, events and
+  refusals out, and the (player, sequence) order.
+- `test_sim_determinism.cpp` - the same game twice, a recorded log replayed, and
+  the log written to bytes and replayed, all agreeing on the checksum every
+  tick; and the checksum noticing a different seed, a different speed, and
+  different slot bookkeeping.
+
+A CTest entry, `sim_uses_no_floating_point` (`cmake/CheckSimNoFloats.cmake`),
+fails if the word `float` or `double` appears anywhere under `src/sim`, comments
+included, so the simulation's comments say "fractional" instead.
+
+The game side:
+
+- `test_sim_convert.cpp` - `entity/SimConvert`: simulation to world axes, the
+  heading rotation, and interpolation between two ticks.
+- `test_entity_manager.cpp` - entities realised and unrealised as vehicles come
+  into and out of range (against a fake `GridSink`), placed where the
+  simulation says, rebuilt after `clear()`, the wheels turning on their axles,
+  and presenting never changing the simulation's checksum.
 - `test_transform.cpp` - the maths in `game/Transform.hpp`.
 - `test_attachment.cpp` - the grid hierarchy and the attachment system.
 - `test_voxel_file.cpp` - the `.bgvox` chunk encoding, scalars and whole files.
@@ -80,6 +111,83 @@ Anything that meshes, draws or reads input is out of reach and is not covered:
 `VoxelMesher`, `VoxelView`, `Light`, and all of `src/ui`.
 
 ## Architecture
+
+### Simulation and Presentation
+
+The game is split in two. The **simulation** (`src/sim`) is the single source
+of truth for gameplay. The **presentation** (everything else) reads it and
+draws it. Voxel grids are purely cosmetic: the simulation never reads one. This
+is what lets the simulation run things nobody is looking at, things with no
+visual counterpart at all, and later run in lockstep across machines.
+
+Rules the simulation keeps, and that anything added to it must keep:
+
+- **No raylib, enforced.** `business_game_sim` has no raylib on its include
+  path, so including a `voxel/` or `ui/` header from `src/sim` fails to compile.
+- **No hardware fractional maths.** Everything fractional is `sim::Fixed`
+  (48.16 in an `int64_t`, one unit per terrain voxel). A native and a web build
+  have to agree bit for bit. CTest checks for the keywords.
+- **Fixed ticks.** `sim::TICKS_PER_SECOND` is 20. The simulation counts ticks,
+  never seconds or frames, and knows nothing about the camera.
+- **Deterministic iteration.** Objects live in `sim::Pool` (slots plus a free
+  list, walked in slot order) and are named by generational `sim::Handle`s,
+  never pointers. Never iterate simulation state through an unordered
+  container. Randomness comes from the seeded `sim::Rng` (PCG32, hand written
+  because the std distributions differ between standard libraries).
+- **Every change is a command.** `sim::Command` is a class per action
+  (`AddRoute`, `SpawnVehicle`, `DespawnVehicle`, `SetVehicleSpeed`) with
+  `apply(World&)`, `write_payload()` and `clone()`. A new one also needs a
+  `CommandType` number (the wire format, so never reused) and a case in
+  `read_payload()` in `Command.cpp`. `World` is the mutable state and only a
+  command inside `Simulation::step()` ever holds one; everyone else gets the
+  const accessors.
+- `CommandQueue` stamps a sequence number on submit and the tick on `take()`,
+  so locally a command runs at the next tick. Lockstep would stamp the tick at
+  submit time, a few ticks ahead, and send it to everyone.
+- `step()` applies a tick's commands sorted by (player, sequence), refusing
+  bad ones with a `CommandRejected` event, then advances the systems. Events
+  (`RouteAdded`, `VehicleSpawned`, `VehicleDespawned`) are for discrete changes
+  and last one step; continuous state is read, not pushed.
+- `Simulation::checksum()` is FNV-1a over `write_state()`, which writes the
+  whole state including the pools' slot bookkeeping. Anything left out of
+  `write_state()` is invisible to desync checks. Saving will be built on it but
+  there is no load yet - how saves should work is still to be discussed.
+
+Routes and vehicles are placeholders for testing the split: a route is a closed
+loop of segments that each run along x or y (so lengths are exact without a
+square root), and a vehicle drives round one at a fixed speed per tick.
+
+**Presentation of the simulation** (`src/entity`):
+
+- `Entity` is a simulation object made visible: a grid tree it owns, plus
+  cosmetic `Script`s. `on_tick()` copies what the simulation says after every
+  step; `present()` places the grids every frame. `VehicleEntity` keeps the
+  last two ticks' poses and draws between them, so 20 ticks a second looks
+  smooth (at the cost of being up to a tick behind).
+- `EntityManager` realises an entity for every vehicle within
+  `realize_radius` of the camera and drops it past `unrealize_radius` (two
+  radii, so the boundary does not flicker). A vehicle without an entity keeps
+  driving; when the camera comes back it reappears exactly where the
+  simulation has it. Nothing flows back into the simulation.
+- `AssetRegistry` turns a `sim::AssetId` (a name like `"car.blue"`) into a grid
+  tree, from a `.bgvox` file or a builder function. `placeholder_car_builder()`
+  builds a car in code: a body plus four wheel grids attached through
+  `attach_to()`, named `WHEEL_GRID_NAME`, which is how `WheelSpinScript` finds
+  them to turn them at the vehicle's speed.
+- `GridSink` is the seam between an entity and the VoxelView: an entity hands
+  its grids in and takes them back out before deleting them. The VoxelView
+  implements it, the tests fake it.
+- An entity owns exactly the grids its asset produced, recorded when it was
+  made. A grid someone attaches to one later is not deleted with it.
+- `SimConvert.hpp` is the one-way conversion: simulation (x, y ground, z up) to
+  world (X, Y up, Z), `Fixed` to `float`, and a ground direction to a heading.
+  It assumes the map sits at the world origin.
+
+**Grids are deleted now.** An entity's grids go every time it leaves range, so
+anything holding a `VoxelGrid*` past a frame has to let go when told:
+`VoxelView::add_grid_removal_listener()` is called with the grids just before
+they are deleted. `GridTransformMenu`, `AttachMenu` (through the transform
+menu) and `VoxelEditor` have `forget_grids()` for it, hooked up in `main.cpp`.
 
 ### Scene Graph (ViewNode Tree)
 
@@ -355,6 +463,13 @@ The sun's keybind (U) is mirrored by a button in the bottom left, and its angle
 in the sky by the shader menu rows; both write the same light. The camera
 movement keys (WASD, Q/E, F/C) are held rather than toggled, so they have no
 buttons.
+- **VehiclePanel** (`src/ui/VehiclePanel.cpp/hpp`) - Top centre, under the
+  simulation readout. A free left click on a car (while no other tool owns the
+  click, see `world_click_taken`) selects it; the panel shows what the
+  simulation says about it, and its Slower / Faster / Reverse / Remove buttons
+  queue commands rather than touching anything. The selection is a simulation
+  handle, so it survives the car leaving range. Added to the UI before the
+  transform menu and the editor so that it is updated before them.
 - **VoxelEditor** (`src/ui/VoxelEditor.cpp/hpp`) - A UINode panel in the bottom
   right holding a table of `VoxelPaletteCell`s, one per colour in the grid's
   `voxel_colours` map plus a deselect cell. Pick a colour, then left click the
@@ -407,10 +522,30 @@ grid z (up), Z is grid y.
   write/read pair plus a loader registry keyed on `get_type()`, like the grid
   loaders.
 - `main.cpp` adds a test script that spins the small grid (`voxel_grids[1]`).
+- **Scripts are cosmetic.** `on_update()` takes the frame time, which is right
+  for visuals and wrong for game logic: gameplay belongs in the simulation,
+  ticked. An entity can own scripts of its own (`Entity::add_script()`), which
+  run in its `present()`; `WheelSpinScript` is the example, reading the
+  simulation's speed through its entity.
 
 ### Entry Point
 
 `src/game/main.cpp` - Initializes 1600x900 window, sets up shader pipeline, runs 60 FPS main loop. Supports Emscripten/WebAssembly compilation. `mainLoop()` owns the frame's single `BeginDrawing()`/`EndDrawing()` block, so views draw in tree order (3D first, UI on top) - individual ViewNodes must never open their own drawing block.
+
+Each frame, `mainLoop()` runs whole ticks out of `global::tick_accumulator`
+(at most `MAX_TICKS_PER_FRAME`, dropping the time past that), calling
+`EntityManager::on_tick()` after each step, then `EntityManager::present()`
+with the leftover fraction of a tick, then the scripts, then the view tree.
+`global::game_speed` scales game time (0 pauses). `init()` queues a test
+scenario (`queue_test_scenario()`): two loops of road following the terrain and
+a dozen cars, two of them driving backwards. A readout under the title shows the
+tick, the ticks run that frame, and vehicles in the simulation against vehicles
+drawn.
+
+Shutdown order matters: scripts, then entities (their grids are still in the
+VoxelView, which takes them back), then the shader, the view tree - whose
+VoxelView deletes the grids it still holds, which by then are only its own map
+and test grid - and then the simulation.
 
 `global::shutdown()` unloads the voxel shader and then clears its `locs` and
 `id` by hand. `raylib::Shader` is an owning wrapper whose destructor unloads
@@ -451,6 +586,13 @@ take the narrow header instead of dragging in the window and the view tree.
 
 - Greedy meshing optimization not yet implemented
 - VoxelGrid model vector recreated on every call (VoxelGrid.hpp:71)
+- A placeholder car is five grids, so it takes five shadow atlas slots (256 in
+  all) and five of a draw call's `MAX_GRID_VOLUMES` (8) casters. Two cars side
+  by side already overflow that, and the casters past the eighth cast no shadow
+  on that draw. Fine for the test scenario; a real fleet wants either one brick
+  per vehicle or a larger cap.
+- Moving an entity's root grid with the GridTransformMenu does nothing lasting:
+  the next `present()` puts it back where the simulation says.
 - `apply_transform_rot()` composes two rotations with `QuaternionAdd`, where
   composing is `QuaternionMultiply` - what `transform_transform()` correctly
   uses. Two quarter turns come out as something that is not a half turn and is
