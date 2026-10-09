@@ -115,6 +115,8 @@ The game side:
   of the vertex shader's. The `WaterView` itself needs
   a GL context and is never built.
 - `test_terrain_voxels.cpp` - `entity/TerrainVoxels`: each block type's voxels,
+  which blocks get lowered edges and trims, what each does to the voxels
+  (grass following a lowered edge, a trim stopping over a lowered floor edge),
   a terrain drawn into a `VoxelMap`, and `sim::PerlinNoise` checked against
   `siv::PerlinNoise` (same permutation, values within 1e-3), which only this
   side may include.
@@ -241,11 +243,24 @@ square root), and a vehicle drives round one at a fixed speed per tick.
 
 - `TerrainVoxels` draws the terrain into the `VoxelMap`, each block as a cube
   of `BLOCK_VOXELS` (= `sim::BLOCK_SIZE`, 4) voxels a side: stone grey, dirt
-  brown, grass brown with its top voxel layer green (`block_voxel()`). This is
-  where a block will get more detail than the simulation gives it. The
-  VoxelView is built at `terrain_voxel_size()`, and `build_terrain_voxels()`
+  brown, grass brown with the top voxel of each column green (`block_voxel()`).
+  The VoxelView is built at `terrain_voxel_size()`, and `build_terrain_voxels()`
   empties the map, writes every block and marks every chunk dirty. A terrain
   bigger than the map is cut off, and reported.
+- **Block detail**, purely visual, from each block's four side neighbours and
+  the blocks above and below it (`block_detail()` -> `BlockDetail`, side
+  masks `SIDE_X_POS` and so on). It softens the block grid without hiding it:
+  - *Lowered edges*: a solid block with air above it loses its top row of
+    voxels on each side with air beside it. Grass comes down with it (green is
+    the top voxel of each column). A buried block keeps its edges, so a cliff
+    face gets no grooves.
+  - *Trims*: an air block with a solid block under it gets a row of voxels on
+    its bottom layer along each side with a solid block beside it, filling the
+    inside corner. It is made of the floor (`trim_type`, green on grass), and
+    leaves out the voxels over the floor's own lowered edges
+    (`floor_lowered`) so it never hangs over a notch.
+  - Any number of each on one block. Outside the terrain is air, so the map's
+    border is bevelled too. Vehicles still drive on the block tops.
 
 - `Entity` is a simulation object made visible: a grid tree it owns, plus
   cosmetic `Script`s. `on_tick()` copies what the simulation says after every
