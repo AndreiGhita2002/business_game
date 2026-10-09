@@ -76,6 +76,7 @@ const char* reject_reason_name(const RejectReason reason) {
         case RejectReason::WrongTick: return "wrong tick";
         case RejectReason::NoCommand: return "no command";
         case RejectReason::InvalidWaterLevel: return "invalid water level";
+        case RejectReason::InvalidIsland: return "invalid island";
     }
     return "?";
 }

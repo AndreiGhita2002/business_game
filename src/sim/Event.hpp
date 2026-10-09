@@ -21,6 +21,7 @@ enum class RejectReason : uint8_t {
     WrongTick,        // stamped for a different tick than the one it was handed to
     NoCommand,        // a stamped command with nothing in it
     InvalidWaterLevel, // below the bottom of the world, see MIN_WATER_LEVEL
+    InvalidIsland,    // the footprint is off the world or over land, see place_island()
 };
 
 const char* reject_reason_name(RejectReason reason);
@@ -35,6 +36,20 @@ struct VehicleSpawned { VehicleId id; };
 struct VehicleDespawned { VehicleId id; };
 
 /**
+ * An island was generated (PlaceIsland). The cells it covers are the
+ * footprint of `shape` turned `rotation` times (island_footprint() in
+ * sim/Island.hpp) with its corner at cell (cell_x, cell_y): the ones the
+ * presentation has to draw again. Plain numbers, so this header does not need
+ * the island code.
+ */
+struct IslandPlaced {
+    int32_t cell_x;
+    int32_t cell_y;
+    uint8_t shape;
+    uint8_t rotation;
+};
+
+/**
  * A command that was refused. Refusing happens inside the simulation, at the
  * tick the command runs, so every machine in a lockstep game refuses the same
  * commands the same way.
@@ -45,7 +60,7 @@ struct CommandRejected {
     RejectReason reason;
 };
 
-using Event = std::variant<RouteAdded, VehicleSpawned, VehicleDespawned, CommandRejected>;
+using Event = std::variant<RouteAdded, VehicleSpawned, VehicleDespawned, IslandPlaced, CommandRejected>;
 
 } // namespace sim
 

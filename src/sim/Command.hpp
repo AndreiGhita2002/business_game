@@ -13,6 +13,7 @@
 #include "sim/Event.hpp"
 #include "sim/Fixed.hpp"
 #include "sim/Handle.hpp"
+#include "sim/Island.hpp"
 #include "sim/Routes.hpp"
 #include "sim/Serial.hpp"
 #include "sim/Vehicles.hpp"
@@ -31,6 +32,7 @@ enum class CommandType : uint16_t {
     DespawnVehicle = 3,
     SetVehicleSpeed = 4,
     SetWaterLevel = 5,
+    PlaceIsland = 6,
 };
 
 /**
@@ -138,6 +140,29 @@ public:
     RejectReason apply(World& world) const override;
     void write_payload(ByteWriter& out) const override;
     std::unique_ptr<Command> clone() const override { return std::make_unique<SetWaterLevel>(*this); }
+};
+
+/**
+ * A new island, generated from `spec` with its footprint's corner at cell
+ * (cell_x, cell_y), for the water as it stands (place_island() in
+ * sim/Island.hpp). Refused as InvalidIsland where the footprint hangs off the
+ * world or covers land. Emits IslandPlaced.
+ *
+ * The island is generated inside the step, from the spec alone, so every
+ * machine makes the same one: only the spec travels, never the blocks.
+ */
+class PlaceIsland final : public Command {
+public:
+    int32_t cell_x;
+    int32_t cell_y;
+    IslandSpec spec;
+
+    PlaceIsland(int32_t cell_x, int32_t cell_y, IslandSpec spec) : cell_x(cell_x), cell_y(cell_y), spec(spec) {}
+
+    CommandType type() const override { return CommandType::PlaceIsland; }
+    RejectReason apply(World& world) const override;
+    void write_payload(ByteWriter& out) const override;
+    std::unique_ptr<Command> clone() const override { return std::make_unique<PlaceIsland>(*this); }
 };
 
 /**

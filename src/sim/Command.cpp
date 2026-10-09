@@ -75,6 +75,23 @@ std::unique_ptr<Command> read_payload(const CommandType type, ByteReader& in) {
             if (!in.read_i32(&level)) return nullptr;
             return std::make_unique<SetWaterLevel>(level);
         }
+        case CommandType::PlaceIsland: {
+            int32_t cell_x = 0, cell_y = 0;
+            uint8_t shape = 0, rotation = 0, elevation = 0, biome = 0;
+            uint32_t seed = 0;
+            if (!in.read_i32(&cell_x) || !in.read_i32(&cell_y) || !in.read_u8(&shape) || !in.read_u8(&rotation)
+                || !in.read_u8(&elevation) || !in.read_u8(&biome) || !in.read_u32(&seed)) return nullptr;
+            // A choice that is not one of the enum's is corruption, not a spec
+            if (shape >= ISLAND_SHAPE_COUNT || rotation >= 4 || elevation >= ELEVATION_COUNT
+                || biome >= BIOME_COUNT) return nullptr;
+            IslandSpec spec;
+            spec.shape = static_cast<IslandShape>(shape);
+            spec.rotation = rotation;
+            spec.elevation = static_cast<Elevation>(elevation);
+            spec.biome = static_cast<Biome>(biome);
+            spec.seed = seed;
+            return std::make_unique<PlaceIsland>(cell_x, cell_y, spec);
+        }
     }
     return nullptr;
 }
@@ -119,6 +136,12 @@ RejectReason SetWaterLevel::apply(World& world) const {
     return RejectReason::None;
 }
 
+RejectReason PlaceIsland::apply(World& world) const {
+    if (!place_island(world.terrain, cell_x, cell_y, spec, world.water_level)) return RejectReason::InvalidIsland;
+    world.emit(IslandPlaced{cell_x, cell_y, static_cast<uint8_t>(spec.shape), spec.rotation});
+    return RejectReason::None;
+}
+
 // --- payloads ---
 
 void AddRoute::write_payload(ByteWriter& out) const {
@@ -144,6 +167,16 @@ void SetVehicleSpeed::write_payload(ByteWriter& out) const {
 
 void SetWaterLevel::write_payload(ByteWriter& out) const {
     out.write_i32(level);
+}
+
+void PlaceIsland::write_payload(ByteWriter& out) const {
+    out.write_i32(cell_x);
+    out.write_i32(cell_y);
+    out.write_u8(static_cast<uint8_t>(spec.shape));
+    out.write_u8(spec.rotation);
+    out.write_u8(static_cast<uint8_t>(spec.elevation));
+    out.write_u8(static_cast<uint8_t>(spec.biome));
+    out.write_u32(spec.seed);
 }
 
 // --- stamped commands ---

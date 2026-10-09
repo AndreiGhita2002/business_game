@@ -255,6 +255,104 @@ TEST_CASE("Simulation: SetWaterLevel survives being written to bytes", "[sim][si
     REQUIRE(static_cast<const SetWaterLevel&>(*back->command).level == -7);
 }
 
+namespace {
+
+/** Four by four cells of ocean, no island. */
+TerrainSettings open_sea() {
+    TerrainSettings settings;
+    settings.cells_x = 4;
+    settings.cells_y = 4;
+    settings.centre_island = false;
+    return settings;
+}
+
+IslandSpec square_spec() {
+    IslandSpec spec;
+    spec.shape = IslandShape::Square;
+    spec.elevation = Elevation::Hilly;
+    spec.biome = Biome::Desert;
+    spec.seed = 31;
+    return spec;
+}
+
+} // namespace
+
+TEST_CASE("Simulation: PlaceIsland raises an island out of the sea", "[sim][simulation][island]") {
+    Simulation sim(1, open_sea());
+    const uint64_t before = sim.checksum();
+    CommandQueue queue;
+
+    step_with(sim, queue, std::make_unique<PlaceIsland>(1, 2, square_spec()));
+    REQUIRE(events_of<CommandRejected>(sim).empty());
+
+    const auto placed = events_of<IslandPlaced>(sim);
+    REQUIRE(placed.size() == 1);
+    REQUIRE(placed[0].cell_x == 1);
+    REQUIRE(placed[0].cell_y == 2);
+    REQUIRE(placed[0].shape == static_cast<uint8_t>(IslandShape::Square));
+
+    // Its four cells are land now, and nothing else is
+    for (int32_t cy = 0; cy < 4; ++cy) {
+        for (int32_t cx = 0; cx < 4; ++cx) {
+            const bool covered = (cx == 1 || cx == 2) && (cy == 2 || cy == 3);
+            REQUIRE(sim.terrain().is_ocean_cell(cx, cy) == !covered);
+        }
+    }
+    REQUIRE(sim.checksum() != before);
+
+    // The same command makes the same island in another game
+    Simulation other(1, open_sea());
+    CommandQueue other_queue;
+    step_with(other, other_queue, std::make_unique<PlaceIsland>(1, 2, square_spec()));
+    REQUIRE(other.terrain() == sim.terrain());
+}
+
+TEST_CASE("Simulation: an island off the world or over land is refused", "[sim][simulation][island]") {
+    Simulation sim(1, open_sea());
+    CommandQueue queue;
+    step_with(sim, queue, std::make_unique<PlaceIsland>(0, 0, square_spec()));
+    const Terrain one_island = sim.terrain();
+
+    // Overlapping the first by one cell
+    step_with(sim, queue, std::make_unique<PlaceIsland>(1, 1, square_spec()));
+    // Hanging off the far edge
+    step_with(sim, queue, std::make_unique<PlaceIsland>(3, 0, square_spec()));
+    // and off the near one
+    step_with(sim, queue, std::make_unique<PlaceIsland>(-1, 2, square_spec()));
+
+    REQUIRE(sim.terrain() == one_island);
+    REQUIRE(events_of<IslandPlaced>(sim).empty());
+}
+
+TEST_CASE("Simulation: PlaceIsland survives being written to bytes", "[sim][simulation][island]") {
+    IslandSpec spec;
+    spec.shape = IslandShape::Zigzag;
+    spec.rotation = 3;
+    spec.elevation = Elevation::Mountainous;
+    spec.biome = Biome::Snowy;
+    spec.seed = 0xDEADBEEF;
+    StampedCommand c{9, 2, 4, std::make_unique<PlaceIsland>(-3, 7, spec)};
+    ByteWriter out;
+    write_command(out, c);
+
+    ByteReader in(out.data());
+    const std::optional<StampedCommand> back = read_command(in);
+    REQUIRE(back.has_value());
+    REQUIRE(back->command->type() == CommandType::PlaceIsland);
+    const auto& place = static_cast<const PlaceIsland&>(*back->command);
+    REQUIRE(place.cell_x == -3);
+    REQUIRE(place.cell_y == 7);
+    REQUIRE(place.spec == spec);
+
+    // A shape that is not one is corruption, not a command. The shape is the
+    // first byte after the two cell numbers at the end of the record.
+    std::vector<uint8_t> bytes = out.data();
+    const size_t shape_at = bytes.size() - 8;
+    bytes[shape_at] = ISLAND_SHAPE_COUNT;
+    ByteReader bad(bytes);
+    REQUIRE_FALSE(read_command(bad).has_value());
+}
+
 TEST_CASE("Simulation: the checksum notices the water level", "[sim][simulation][water]") {
     Simulation a(1), b(1);
     CommandQueue queue;
