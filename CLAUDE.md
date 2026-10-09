@@ -799,10 +799,15 @@ resized and drawn, the shadow window over the land, the water's area and the
 ocean cells' sea floor, and the camera over the middle of the land. It runs
 after a load too. The "New Island" button (bottom left) calls `new_world()`,
 which replaces the game as a load does; the game settings menu's "world cells
-x/y" rows set the size it uses. A readout under the title shows the tick, the
-ticks run that frame, vehicles in the simulation against vehicles drawn, and
-the world's seed, shape, elevation and biome ("loaded game" after a load, as
-the seed is not saved).
+x/y" rows set the size it uses. A readout under the title shows the world's
+seed, shape, elevation and biome ("loaded game" after a load, as the seed is
+not saved), and for a few seconds how a save or a load went.
+
+`init()` sets raylib's log level to `LOG_LEVEL` (`LOG_WARNING`) before the
+window opens: raylib logs every mesh it uploads to or frees from VRAM at
+`LOG_INFO`, which thousands of chunks turn into a flood. The game's own
+`LOG_INFO` and `LOG_DEBUG` messages are silenced with it; lower `LOG_LEVEL`
+to see them.
 
 Shutdown order matters: scripts, then entities (their grids are still in the
 VoxelView, which takes them back), then the shader, the view tree - whose

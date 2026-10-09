@@ -59,6 +59,9 @@ constexpr const char* QUICKSAVE_PATH = "../saves/quicksave.bgsave";
 constexpr int QUICKSAVE_KEY = KEY_F5;
 constexpr int QUICKLOAD_KEY = KEY_F9;
 
+// The least serious log message printed, see init()
+constexpr int LOG_LEVEL = LOG_WARNING;
+
 // How long a status line stays in the readout, in seconds
 constexpr float STATUS_SECONDS = 3.0f;
 
@@ -76,6 +79,13 @@ static uint32_t fresh_seed();
 static std::string world_description;
 
 void global::init() {
+    // Warnings and errors only. raylib logs every mesh it uploads to or frees
+    // from VRAM at LOG_INFO, which a map of thousands of chunks turns into a
+    // flood, along with its start-up report on the GL context and every shader
+    // and texture. The game's own routine messages go with them; set this
+    // lower to see everything again.
+    SetTraceLogLevel(LOG_LEVEL);
+
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
     raylib::Window::Init(1600, 900, "business game");
 
@@ -147,9 +157,8 @@ void global::init() {
     title->background = ui_view->style.background;
     ui_view->add_child(std::move(title));
 
-    // What the simulation is doing, under the title: the tick, how many ticks
-    // the last frame ran, and how many vehicles exist against how many are
-    // drawn, which is the realise radius at work
+    // Under the title: which world this is, and for a few seconds after a save
+    // or a load, how it went
     auto sim_readout_node = std::make_unique<UILabel>(ui_view, "",
         Rectangle{0.0f, 54.0f, 0.0f, 0.0f}, Anchor::TOP_CENTER);
     auto sim_readout = sim_readout_node.get();
@@ -157,9 +166,7 @@ void global::init() {
     sim_readout->background = ui_view->style.background;
     ui_view->add_child(std::move(sim_readout_node));
     add_script(std::make_unique<LambdaScript>("simulation readout", [sim_readout](const float delta) {
-        sim_readout->text = TextFormat("tick %llu  |  %d ticks this frame  |  %zu vehicles, %zu drawn  |  %s",
-            static_cast<unsigned long long>(simulation->tick()), ticks_last_frame,
-            simulation->vehicles().size(), entities->realized_count(), world_description.c_str());
+        sim_readout->text = world_description;
         if (status_seconds_left > 0.0f) {
             sim_readout->text += "  |  " + status_message;
             status_seconds_left -= delta;
@@ -379,7 +386,6 @@ void global::mainLoop() {
         ticks_run++;
     }
     if (ticks_run == MAX_TICKS_PER_FRAME) tick_accumulator = 0.0f;
-    ticks_last_frame = ticks_run;
 
     // The entities are drawn the leftover fraction of the way between the
     // last two ticks, which is what makes 20 ticks a second look smooth

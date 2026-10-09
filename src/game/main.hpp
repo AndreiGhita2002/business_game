@@ -55,8 +55,6 @@ namespace global {
     inline float tick_accumulator = 0.0f;
     // How fast game time runs against real time. 0 pauses the simulation.
     inline float game_speed = 1.0f;
-    // How many ticks the last frame ran, for the debug readout
-    inline int ticks_last_frame = 0;
 
     // A line the readout shows for a few seconds, such as how a save went
     inline std::string status_message;
