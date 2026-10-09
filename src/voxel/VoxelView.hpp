@@ -23,6 +23,8 @@
 // above anything it will use.
 #define WORLD_VOLUME_TEXTURE_UNIT 12
 #define GRID_ATLAS_TEXTURE_UNIT 13
+// The world volume's coarse occupancy, which shadow rays skip empty space with
+#define WORLD_COARSE_TEXTURE_UNIT 14
 
 // How many grid volumes one draw call can be traced against. Patched into the
 // shader as MAX_GRID_VOLUMES by global::loadAndPatchShader(), so the two cannot
@@ -59,6 +61,10 @@ public:
     // set_volume_window() moves it.
     VoxelVolume world_volume;
     Int3 world_volume_origin{0, 0, 0};
+    // The same window at one voxel per WORLD_COARSE^3 (VoxelVolume.hpp), 1
+    // where any of them is solid: march_world() in lighting.fs strides across
+    // the empty ones instead of walking every voxel
+    VoxelVolume world_coarse;
     // How much of it, from the bottom up, holds anything: the map's
     // solid_top(), refreshed whenever a chunk is uploaded. The shader is told
     // the volume ends there, so a shadow ray stops at the top of the ground
@@ -132,6 +138,7 @@ private:
     int volume_loc{-1};
     int world_to_volume_loc{-1};
     int volume_size_loc{-1};
+    int world_coarse_loc{-1};
     int grid_atlas_loc{-1};
     int grid_volume_count_loc{-1};
     int grid_volume_matrix_loc[MAX_GRID_VOLUMES]{};

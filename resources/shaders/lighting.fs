@@ -59,6 +59,11 @@ uniform mat4 worldToVolume;
 // stops at the top of the ground rather than at the top of the texture, see
 // VoxelView::world_volume_top: there is nothing above it to hit.
 uniform ivec3 volumeSize;
+// One texel per WORLD_COARSE^3 voxels of worldVolume, 1 where any of them is
+// solid, for march_world() to skip empty space with. Must match WORLD_COARSE
+// in game/Picking.hpp.
+uniform sampler3D worldCoarse;
+#define WORLD_COARSE 4
 
 // The grids that are not the map: one brick of the atlas each, one chunk on a
 // side. MAX_GRID_VOLUMES is patched in alongside MAX_LIGHTS, from the constant
@@ -174,6 +179,74 @@ bool march_volume(sampler3D tex, ivec3 texOrigin, ivec3 size, vec3 origin, vec3 
     return false;
 }
 
+/**
+ * The world's walk, in two levels. worldCoarse holds one texel per
+ * WORLD_COARSE^3 voxels, set where any of them is solid: the ray strides
+ * across those cells, a step a cell, and is only walked voxel by voxel
+ * (march_volume() boxed to the cell) inside a cell that has something in it.
+ * Most of a shadow ray's way is open air, which now costs a quarter of the
+ * steps, and the answer is the same as walking every voxel.
+ *
+ * The C++ twin is volume_march_coarse() (game/Picking.cpp), which the tests
+ * hold to the plain walk. Change the two together.
+ */
+bool march_world(vec3 origin, vec3 dir, inout int steps) {
+    ivec3 size = volumeSize;
+    if (size.x <= 0) return false;
+    ivec3 cells = (size + ivec3(WORLD_COARSE - 1)) / WORLD_COARSE;
+
+    // The same ray in cell coordinates; the direction stays as it is, as only
+    // the order the boundaries are crossed in matters
+    vec3 cell_origin = origin / float(WORLD_COARSE);
+
+    const float EPS_DIR = 1e-6;
+    vec3 d = vec3(
+        abs(dir.x) < EPS_DIR ? EPS_DIR : dir.x,
+        abs(dir.y) < EPS_DIR ? EPS_DIR : dir.y,
+        abs(dir.z) < EPS_DIR ? EPS_DIR : dir.z);
+    vec3 inv_d = 1.0 / d;
+
+    vec3 t_lo = (vec3(0.0) - cell_origin) * inv_d;
+    vec3 t_hi = (vec3(cells) - cell_origin) * inv_d;
+    vec3 t_near = min(t_lo, t_hi);
+    vec3 t_far  = max(t_lo, t_hi);
+    float t_enter = max(max(t_near.x, t_near.y), t_near.z);
+    float t_exit  = min(min(t_far.x,  t_far.y),  t_far.z);
+    if (t_exit < max(t_enter, 0.0)) return false;
+
+    float t_start = max(t_enter, 0.0) + 1e-4;
+    vec3 p = cell_origin + d * t_start;
+
+    ivec3 cell = clamp(ivec3(floor(p)), ivec3(0), cells - ivec3(1));
+    ivec3 step_dir = ivec3(sign(d));
+    vec3 t_delta = abs(inv_d);
+    vec3 t_max = (vec3(cell) + max(vec3(step_dir), vec3(0.0)) - p) * inv_d;
+
+    for (int i = 0; i < SHADOW_MAX_STEPS; ++i) {
+        if (any(lessThan(cell, ivec3(0))) || any(greaterThanEqual(cell, cells)))
+            return false;
+
+        steps += 1;
+        // The cap is on cells and voxels together. Spent, the ray is lit.
+        if (steps >= SHADOW_MAX_STEPS) return false;
+
+        if (texelFetch(worldCoarse, cell, 0).r > 0.0) {
+            ivec3 lo = cell * WORLD_COARSE;
+            ivec3 hi = min(lo + ivec3(WORLD_COARSE), size);
+            if (march_volume(worldVolume, lo, hi - lo, origin - vec3(lo), dir, steps)) return true;
+        }
+
+        if (t_max.x < t_max.y) {
+            if (t_max.x < t_max.z) { cell.x += step_dir.x; t_max.x += t_delta.x; }
+            else                   { cell.z += step_dir.z; t_max.z += t_delta.z; }
+        } else {
+            if (t_max.y < t_max.z) { cell.y += step_dir.y; t_max.y += t_delta.y; }
+            else                   { cell.z += step_dir.z; t_max.z += t_delta.z; }
+        }
+    }
+    return false;
+}
+
 // Whether light i reaches this fragment: 1.0 lit, 0.0 in shadow.
 float light_visibility(int i, vec3 N, out int steps) {
     steps = 0;
@@ -188,9 +261,7 @@ float light_visibility(int i, vec3 N, out int steps) {
     vec3 toLight = -lights[i].direction;
 
     // The world first: the terrain is what most rays run into
-    if (march_volume(worldVolume, ivec3(0), volumeSize,
-                     to_voxel(worldToVolume, start),
-                     to_voxel_dir(worldToVolume, toLight), steps))
+    if (march_world(to_voxel(worldToVolume, start), to_voxel_dir(worldToVolume, toLight), steps))
         return 0.0;
 
     // Then the grids this draw call was handed, each traced in its own space.

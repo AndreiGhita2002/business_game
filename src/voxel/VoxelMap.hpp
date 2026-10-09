@@ -81,9 +81,11 @@ public:
      * outside the window is left out, and casts no shadow.
      *
      * Says whether anything was uploaded, which is when solid_top() may have
-     * moved.
+     * moved. `coarse`, when there is one, is the volume's coarse occupancy
+     * (one voxel per WORLD_COARSE^3 of it), and a chunk's cells of it go up
+     * with the chunk.
      */
-    bool update_volume(VoxelVolume& volume, Int3 window_origin = Int3{0, 0, 0});
+    bool update_volume(VoxelVolume& volume, VoxelVolume* coarse = nullptr, Int3 window_origin = Int3{0, 0, 0});
 
     /**
      * The voxels of the window from `origin` of `size` (both in voxels, whole

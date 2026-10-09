@@ -64,6 +64,9 @@ void VoxelView::bindWorldVolume() const {
     world_volume.bind(WORLD_VOLUME_TEXTURE_UNIT);
     const int unit = WORLD_VOLUME_TEXTURE_UNIT;
     SetShaderValue(*voxel_shader, volume_loc, &unit, SHADER_UNIFORM_INT);
+    world_coarse.bind(WORLD_COARSE_TEXTURE_UNIT);
+    const int coarse_unit = WORLD_COARSE_TEXTURE_UNIT;
+    SetShaderValue(*voxel_shader, world_coarse_loc, &coarse_unit, SHADER_UNIFORM_INT);
 
     // World space back into the map's own space, which is where its voxels
     // are. Worked out every frame rather than cached, so that moving the map
@@ -204,7 +207,8 @@ void VoxelView::updateVoxelMesh() const {
 
 void VoxelView::updateVolumes() {
     // The map's voxels, which every shadow ray is traced against
-    if (game_map->update_volume(world_volume, world_volume_origin)) world_volume_top = game_map->solid_top();
+    if (game_map->update_volume(world_volume, &world_coarse, world_volume_origin))
+        world_volume_top = game_map->solid_top();
 
     // And a brick for every other grid. A grid keeps its slot for as long as it
     // lives and hands it back in its destructor, so this only ever hands out
@@ -266,6 +270,33 @@ void VoxelView::set_volume_window(const Int3 origin, const Int3 size) {
     if (voxels != nullptr) game_map->copy_window(voxels, start, volume_size);
     else for (auto& [chunk_pos, dirty] : game_map->chunk_volume_dirty) dirty = true;
     world_volume.create(volume_size, voxels);
+
+    // Its coarse occupancy, a cell per WORLD_COARSE^3 voxels, from the same
+    // copy. The window is whole chunks, so whole cells.
+    const Int3 coarse_size{volume_size.x / WORLD_COARSE, volume_size.y / WORLD_COARSE, volume_size.z / WORLD_COARSE};
+    auto* cells = static_cast<VoxelID*>(std::calloc(
+        static_cast<size_t>(coarse_size.x) * static_cast<size_t>(coarse_size.y) * static_cast<size_t>(coarse_size.z), 1));
+    if (voxels != nullptr && cells != nullptr) {
+        const size_t row = static_cast<size_t>(volume_size.x);
+        const size_t layer = row * static_cast<size_t>(volume_size.y);
+        for (int z = 0; z < volume_size.z; ++z) {
+            for (int y = 0; y < volume_size.y; ++y) {
+                const VoxelID* line = voxels + static_cast<size_t>(z) * layer + static_cast<size_t>(y) * row;
+                VoxelID* cell_line = cells + static_cast<size_t>(z / WORLD_COARSE) * coarse_size.x * coarse_size.y +
+                                     static_cast<size_t>(y / WORLD_COARSE) * coarse_size.x;
+                for (int x = 0; x < volume_size.x; ++x) {
+                    if (line[x] != 0) cell_line[x / WORLD_COARSE] = 1;
+                }
+            }
+        }
+    }
+    // Without the copy every cell is called occupied, which walks every voxel
+    // as before rather than skipping one that is not empty
+    else if (cells != nullptr) {
+        std::fill_n(cells, static_cast<size_t>(coarse_size.x) * coarse_size.y * coarse_size.z, VoxelID{1});
+    }
+    world_coarse.create(coarse_size, cells);
+    std::free(cells);
     std::free(voxels);
     world_volume_top = game_map->solid_top();
 }
@@ -301,6 +332,7 @@ VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader, const Int3 map_si
     volume_loc = GetShaderLocation(*voxel_shader, "worldVolume");
     world_to_volume_loc = GetShaderLocation(*voxel_shader, "worldToVolume");
     volume_size_loc = GetShaderLocation(*voxel_shader, "volumeSize");
+    world_coarse_loc = GetShaderLocation(*voxel_shader, "worldCoarse");
     grid_atlas_loc = GetShaderLocation(*voxel_shader, "gridAtlas");
     grid_volume_count_loc = GetShaderLocation(*voxel_shader, "gridVolumeCount");
     for (int i = 0; i < MAX_GRID_VOLUMES; ++i) {

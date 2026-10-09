@@ -50,6 +50,12 @@ public:
     void upload_chunk(Int3 origin, const VoxelChunk& chunk) const;
 
     /**
+     * Writes a box of `dims` voxels (x fastest, then y, then z) into the
+     * volume at `origin`. Refused, with a warning, if it hangs over the edge.
+     */
+    void upload_block(Int3 origin, Int3 dims, const VoxelID* voxels) const;
+
+    /**
      * Binds the texture to a texture unit, where it stays until something else
      * binds over it. Pick a unit above the ones raylib hands to material maps.
      */
@@ -61,5 +67,18 @@ private:
     unsigned int texture_id = 0;
     Int3 size{0, 0, 0};
 };
+
+/**
+ * How many voxels a side one cell of the world's coarse occupancy volume is.
+ * The shadow ray strides across these where they are empty (march_world() in
+ * lighting.fs, which has its own WORLD_COARSE that must match). A terrain
+ * block, and a whole number of them to a chunk.
+ */
+constexpr int WORLD_COARSE = 4;
+static_assert(CHUNK_SIZE % WORLD_COARSE == 0, "a chunk has to be whole coarse cells");
+
+/** A chunk's coarse cells, (CHUNK_SIZE / WORLD_COARSE)^3 of them, x fastest: 1 where any voxel is solid. */
+constexpr int CHUNK_COARSE = CHUNK_SIZE / WORLD_COARSE;
+void coarse_cells(const VoxelChunk& chunk, VoxelID out[CHUNK_COARSE * CHUNK_COARSE * CHUNK_COARSE]);
 
 #endif //BUSINESS_GAME_VOXELVOLUME_HPP

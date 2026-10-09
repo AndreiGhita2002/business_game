@@ -4,10 +4,12 @@
 
 #ifndef BUSINESS_GAME_PICKING_HPP
 #define BUSINESS_GAME_PICKING_HPP
+#include <functional>
 #include <raylib.h>
 #include <vector>
 
 #include "voxel/VoxelGrid.hpp"
+#include "voxel/VoxelVolume.hpp"   // WORLD_COARSE
 
 /**
  * Turning a ray into the voxel it landed on, and the matrix that has to agree
@@ -56,6 +58,30 @@ Matrix voxel_model_matrix(const VoxelGrid* grid, const ModelInfo& model_info);
  *        false, the same cap the shader has.
  */
 bool voxel_ray_blocked(VoxelGrid* grid, Vector3 origin, Vector3 dir, int max_steps = 256);
+
+/** Whether voxel `v` of a volume is solid, for the marches below. */
+using VolumeSolid = std::function<bool(Int3 v)>;
+
+/**
+ * The shader's march_volume() as it is, line for line: a volume of `size`
+ * voxels from 0, a ray from `origin` along `dir` in voxel coordinates, carried
+ * to the volume's box first when it starts outside it. Counts each voxel it
+ * reads into `steps` and gives up (lit) after `max_steps` of its own.
+ * Change the two together.
+ */
+bool volume_march(const VolumeSolid& solid, Int3 size, Vector3 origin, Vector3 dir, int max_steps, int* steps);
+
+/**
+ * The shader's march_world(), the two level walk a shadow ray takes through
+ * the world: across the coarse cells (`coarse_solid`, in cell coordinates),
+ * and through the voxels of a cell only where the cell is occupied, with
+ * volume_march() boxed to that cell. Empty space costs a step a cell rather
+ * than a step a voxel, and the answer is the same as volume_march() over the
+ * whole volume, which the tests hold it to. `max_steps` caps the cells and
+ * voxels read together. Change the two together.
+ */
+bool volume_march_coarse(const VolumeSolid& solid, const VolumeSolid& coarse_solid, Int3 size,
+                         Vector3 origin, Vector3 dir, int max_steps, int* steps);
 
 /**
  * The world space box that the cube of `size` voxels a grid or model is built

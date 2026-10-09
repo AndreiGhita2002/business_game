@@ -4,6 +4,7 @@
 
 #include "voxel/VoxelVolume.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 
 #include <raylib.h>
@@ -72,29 +73,46 @@ void VoxelVolume::destroy() {
 }
 
 void VoxelVolume::upload_chunk(const Int3 origin, const VoxelChunk& chunk) const {
+    // A VoxelChunk is indexed x + y*CHUNK_SIZE + z*CHUNK_SIZE*CHUNK_SIZE, which
+    // is the order glTexSubImage3D reads its input in, so the array goes over
+    // as it stands.
+    upload_block(origin, Int3{CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE}, chunk.data());
+}
+
+void VoxelVolume::upload_block(const Int3 origin, const Int3 dims, const VoxelID* voxels) const {
     if (texture_id == 0) return;
 
     // Refused rather than wrapped or clipped: a volume is built to whole
-    // chunks, so a chunk that does not fit is a mistake somewhere else.
+    // chunks, so a block that does not fit is a mistake somewhere else.
     if (origin.x < 0 || origin.y < 0 || origin.z < 0 ||
-        origin.x + CHUNK_SIZE > size.x ||
-        origin.y + CHUNK_SIZE > size.y ||
-        origin.z + CHUNK_SIZE > size.z) {
-        TraceLog(LOG_WARNING, "VOXELVOLUME: [ID %u] a chunk at %i,%i,%i does not fit in %i by %i by %i",
+        origin.x + dims.x > size.x ||
+        origin.y + dims.y > size.y ||
+        origin.z + dims.z > size.z) {
+        TraceLog(LOG_WARNING, "VOXELVOLUME: [ID %u] a block at %i,%i,%i does not fit in %i by %i by %i",
                  texture_id, origin.x, origin.y, origin.z, size.x, size.y, size.z);
         return;
     }
 
     glBindTexture(GL_TEXTURE_3D, texture_id);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    // A VoxelChunk is indexed x + y*CHUNK_SIZE + z*CHUNK_SIZE*CHUNK_SIZE, which
-    // is the order glTexSubImage3D reads its input in, so the array goes over
-    // as it stands.
     glTexSubImage3D(GL_TEXTURE_3D, 0,
                     origin.x, origin.y, origin.z,
-                    CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE,
-                    GL_RED, GL_UNSIGNED_BYTE, chunk.data());
+                    dims.x, dims.y, dims.z,
+                    GL_RED, GL_UNSIGNED_BYTE, voxels);
     glBindTexture(GL_TEXTURE_3D, 0);
+}
+
+void coarse_cells(const VoxelChunk& chunk, VoxelID out[CHUNK_COARSE * CHUNK_COARSE * CHUNK_COARSE]) {
+    std::fill_n(out, CHUNK_COARSE * CHUNK_COARSE * CHUNK_COARSE, VoxelID{0});
+    for (int z = 0; z < CHUNK_SIZE; ++z) {
+        for (int y = 0; y < CHUNK_SIZE; ++y) {
+            for (int x = 0; x < CHUNK_SIZE; ++x) {
+                if (chunk[x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE] == 0) continue;
+                out[x / WORLD_COARSE + (y / WORLD_COARSE) * CHUNK_COARSE +
+                    (z / WORLD_COARSE) * CHUNK_COARSE * CHUNK_COARSE] = 1;
+            }
+        }
+    }
 }
 
 void VoxelVolume::bind(const int texture_unit) const {

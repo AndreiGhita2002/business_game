@@ -116,6 +116,119 @@ bool voxel_ray_blocked(VoxelGrid* grid, const Vector3 origin, const Vector3 dir,
     return false;
 }
 
+bool volume_march(const VolumeSolid& solid, const Int3 size, const Vector3 origin, const Vector3 dir,
+                  const int max_steps, int* steps) {
+    if (size.x <= 0 || size.y <= 0 || size.z <= 0) return false;
+
+    // A component of exactly zero would divide by zero below. Nudged to
+    // something tiny, the boundary on that axis lands so far away that the
+    // walk never crosses it, which is what a ray parallel to an axis should do.
+    constexpr float EPS_DIR = 1e-6f;
+    const Vector3 d = {
+        std::fabs(dir.x) < EPS_DIR ? EPS_DIR : dir.x,
+        std::fabs(dir.y) < EPS_DIR ? EPS_DIR : dir.y,
+        std::fabs(dir.z) < EPS_DIR ? EPS_DIR : dir.z,
+    };
+    const Vector3 inv_d = {1.0f / d.x, 1.0f / d.y, 1.0f / d.z};
+
+    // Skip the empty space in front of the volume: the ray against the box,
+    // near and far
+    const Vector3 t_lo = {(0.0f - origin.x) * inv_d.x, (0.0f - origin.y) * inv_d.y, (0.0f - origin.z) * inv_d.z};
+    const Vector3 t_hi = {(static_cast<float>(size.x) - origin.x) * inv_d.x,
+                          (static_cast<float>(size.y) - origin.y) * inv_d.y,
+                          (static_cast<float>(size.z) - origin.z) * inv_d.z};
+    const Vector3 t_near = Vector3Min(t_lo, t_hi);
+    const Vector3 t_far = Vector3Max(t_lo, t_hi);
+    const float t_enter = std::max({t_near.x, t_near.y, t_near.z});
+    const float t_exit = std::min({t_far.x, t_far.y, t_far.z});
+
+    // The ray never crosses the volume at all, or only behind its start
+    if (t_exit < std::max(t_enter, 0.0f)) return false;
+
+    // Start where the ray stands, or just inside the box when it is outside.
+    // The nudge keeps the first voxel off the boundary itself.
+    const float t_start = std::max(t_enter, 0.0f) + 1e-4f;
+    const Vector3 p = Vector3Add(origin, Vector3Scale(d, t_start));
+
+    Int3 voxel = {
+        std::clamp(static_cast<int>(std::floor(p.x)), 0, size.x - 1),
+        std::clamp(static_cast<int>(std::floor(p.y)), 0, size.y - 1),
+        std::clamp(static_cast<int>(std::floor(p.z)), 0, size.z - 1),
+    };
+    const Int3 step = {d.x > 0.0f ? 1 : -1, d.y > 0.0f ? 1 : -1, d.z > 0.0f ? 1 : -1};
+    const Vector3 t_delta = {std::fabs(inv_d.x), std::fabs(inv_d.y), std::fabs(inv_d.z)};
+    Vector3 t_max = {
+        (static_cast<float>(voxel.x) + (step.x > 0 ? 1.0f : 0.0f) - p.x) * inv_d.x,
+        (static_cast<float>(voxel.y) + (step.y > 0 ? 1.0f : 0.0f) - p.y) * inv_d.y,
+        (static_cast<float>(voxel.z) + (step.z > 0 ? 1.0f : 0.0f) - p.z) * inv_d.z,
+    };
+
+    for (int i = 0; i < max_steps; ++i) {
+        // Out of this volume: nothing left in it that could block the ray
+        if (voxel.x < 0 || voxel.y < 0 || voxel.z < 0 || voxel.x >= size.x || voxel.y >= size.y ||
+            voxel.z >= size.z)
+            return false;
+
+        if (steps != nullptr) *steps += 1;
+        if (solid(voxel)) return true;
+
+        // Step across the nearest boundary of the three
+        if (t_max.x < t_max.y) {
+            if (t_max.x < t_max.z) { voxel.x += step.x; t_max.x += t_delta.x; }
+            else                   { voxel.z += step.z; t_max.z += t_delta.z; }
+        } else {
+            if (t_max.y < t_max.z) { voxel.y += step.y; t_max.y += t_delta.y; }
+            else                   { voxel.z += step.z; t_max.z += t_delta.z; }
+        }
+    }
+    // Ran out of steps, which is called lit
+    return false;
+}
+
+bool volume_march_coarse(const VolumeSolid& solid, const VolumeSolid& coarse_solid, const Int3 size,
+                         const Vector3 origin, const Vector3 dir, const int max_steps, int* steps) {
+    int local_steps = 0;
+    int& count = steps != nullptr ? *steps : local_steps;
+
+    // The coarse volume covers the fine one, its last cell cut short where the
+    // fine one does not fill it
+    const Int3 cells = {
+        (size.x + WORLD_COARSE - 1) / WORLD_COARSE,
+        (size.y + WORLD_COARSE - 1) / WORLD_COARSE,
+        (size.z + WORLD_COARSE - 1) / WORLD_COARSE,
+    };
+    // The same ray in cell coordinates: a cell is WORLD_COARSE voxels, and the
+    // direction can stay as it is, as only the order the boundaries are
+    // crossed in matters
+    const Vector3 cell_origin = Vector3Scale(origin, 1.0f / WORLD_COARSE);
+
+    // The coarse walk is volume_march() over the cells, with a cell that is
+    // occupied walked again voxel by voxel, boxed to that cell
+    const VolumeSolid cell_blocks = [&](const Int3 cell) {
+        if (!coarse_solid(cell)) return false;
+        const Int3 lo = {cell.x * WORLD_COARSE, cell.y * WORLD_COARSE, cell.z * WORLD_COARSE};
+        const Int3 hi = {
+            std::min(lo.x + WORLD_COARSE, size.x),
+            std::min(lo.y + WORLD_COARSE, size.y),
+            std::min(lo.z + WORLD_COARSE, size.z),
+        };
+        const VolumeSolid in_cell = [&](const Int3 v) { return solid(Int3{lo.x + v.x, lo.y + v.y, lo.z + v.z}); };
+        const Vector3 cell_relative = {origin.x - static_cast<float>(lo.x), origin.y - static_cast<float>(lo.y),
+                                       origin.z - static_cast<float>(lo.z)};
+        return volume_march(in_cell, Int3{hi.x - lo.x, hi.y - lo.y, hi.z - lo.z}, cell_relative, dir,
+                            max_steps, &count);
+    };
+
+    // Each cell costs a step as well as whatever its voxels cost, and the cap
+    // is on the two together: once it is spent nothing more can block the
+    // ray, so it comes out lit (the shader stops there and then)
+    const VolumeSolid capped = [&](const Int3 cell) {
+        if (count >= max_steps) return false;
+        return cell_blocks(cell);
+    };
+    return volume_march(capped, cells, cell_origin, dir, max_steps, &count);
+}
+
 bool find_voxel_on_ray(const Ray ray, const std::vector<VoxelGrid*>* voxel_grids,
                        const char* grid_type, VoxelRayHit* out) {
     VoxelRayHit best{};

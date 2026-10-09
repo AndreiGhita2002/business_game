@@ -116,7 +116,9 @@ The game side:
 - `test_voxel_file.cpp` - the `.bgvox` chunk encoding, scalars and whole files.
 - `test_voxel_mesh.cpp` - `build_chunk_mesh_data()`: which faces come out, the
   faces dropped against a neighbouring chunk, and the baked ambient occlusion.
-- `test_voxel_ray.cpp` - `voxel_ray_blocked()`, the voxel walk a shadow ray
+- `test_voxel_ray.cpp` - the shadow walks: `volume_march()` and the two level
+  `volume_march_coarse()` agreeing on thousands of random rays, and
+  `voxel_ray_blocked()`, the voxel walk a shadow ray
   does, which is the testable twin of the one in `lighting.fs`, plus the boxes
   that decide which grids a draw call is traced against.
 - `test_frustum.cpp` - `game/Frustum`: boxes kept and thrown away against a
@@ -592,14 +594,24 @@ any more:
   `lighting.fs` walks that grid from the fragment towards the light, one voxel
   at a time, with Amanatides and Woo's traversal. The first solid voxel it meets
   puts the fragment in shadow; running out of world leaves it lit.
-- The walk is mirrored in C++ as `voxel_ray_blocked()` in `game/Picking.cpp`,
-  which is what the unit tests cover, as a shader cannot be tested. **Change the
-  two together.**
+- **Two levels through the world.** `world_coarse` is the same window at one
+  voxel per `WORLD_COARSE`^3 (4, a terrain block; `VoxelVolume.hpp`), 1 where
+  any voxel in the cell is solid. `march_world()` strides across those cells
+  and walks voxel by voxel (`march_volume()` boxed to the cell) only inside an
+  occupied one, so open air costs a step a cell. It is filled with the window
+  (`set_volume_window()`) and a chunk's cells go up with the chunk on an edit
+  (`update_volume()`, `coarse_cells()`).
+- The walks are mirrored in C++ in `game/Picking.cpp`: `volume_march()` is
+  `march_volume()` line for line, `volume_march_coarse()` is `march_world()`,
+  and `voxel_ray_blocked()` is the older grid walk. The tests hold the coarse
+  walk to the plain one on thousands of random rays, as a shader cannot be
+  tested. **Change them together.**
 - A shadow ray starts a hundredth of a voxel along the surface normal, so it
   begins in the air voxel in front of the face rather than on the boundary of
   the solid one behind it. Voxel normals are exact, so this holds at any light
   angle. It is the only constant the shadows have.
-- `SHADOW_MAX_STEPS` in the shader caps how far a ray travels. A ray that runs
+- `SHADOW_MAX_STEPS` in the shader caps how far a ray travels, counting coarse
+  cells and voxels together. A ray that runs
   out is called lit, which is why a very low sun is kept out of the shader
   menu's range: the flatter the angle, the further a ray goes before it clears
   the terrain.
@@ -619,8 +631,8 @@ any more:
   (`box_casts_onto()` in `game/Picking.cpp`). At most `MAX_GRID_VOLUMES` of
   them, which `loadAndPatchShader()` patches into the shader so the two sides
   cannot disagree.
-- The volumes are bound to texture units `WORLD_VOLUME_TEXTURE_UNIT` (12) and
-  `GRID_ATLAS_TEXTURE_UNIT` (13), above the units raylib hands to a material's
+- The volumes are bound to texture units `WORLD_VOLUME_TEXTURE_UNIT` (12),
+  `GRID_ATLAS_TEXTURE_UNIT` (13) and `WORLD_COARSE_TEXTURE_UNIT` (14), above the units raylib hands to a material's
   own maps as it draws.
 - ShaderMenu's `step view` row colours every fragment by how far its shadow ray
   travelled, green for short and red for long. It is the tool for finding where

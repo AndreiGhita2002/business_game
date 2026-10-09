@@ -5,6 +5,7 @@
 #include "TestHelpers.hpp"
 
 #include "game/Picking.hpp"
+#include "sim/Rng.hpp"
 
 /**
  * The voxel walk a shadow ray does.
@@ -153,4 +154,120 @@ TEST_CASE("which grids could shadow a model", "[voxelbounds]") {
     SECTION("a grid always reaches itself, which is what shadows a vehicle with its own shape") {
         REQUIRE(box_casts_onto(receiver, receiver, straight_down, 64.0f));
     }
+}
+
+namespace {
+
+/**
+ * A small world for the marches: hills (a column of solid up to a height that
+ * rolls across it) with the odd floating voxel, its size not a whole number of
+ * coarse cells on any axis, so the last cells are cut short.
+ */
+struct MarchWorld {
+    Int3 size{30, 22, 18};
+    std::vector<uint8_t> voxels;
+
+    MarchWorld() {
+        voxels.assign(static_cast<size_t>(size.x) * size.y * size.z, 0);
+        sim::Rng rng(7);
+        for (int y = 0; y < size.y; ++y) {
+            for (int x = 0; x < size.x; ++x) {
+                const int height = 3 + (x * 7 + y * 3) % 6 + ((x / 5 + y / 4) % 2) * 3;
+                for (int z = 0; z < height; ++z) voxels[index(x, y, z)] = 1;
+            }
+        }
+        for (int i = 0; i < 40; ++i) {
+            voxels[index(static_cast<int>(rng.next_below(size.x)), static_cast<int>(rng.next_below(size.y)),
+                         12 + static_cast<int>(rng.next_below(size.z - 12)))] = 1;
+        }
+    }
+
+    size_t index(const int x, const int y, const int z) const {
+        return static_cast<size_t>(x) + static_cast<size_t>(y) * size.x + static_cast<size_t>(z) * size.x * size.y;
+    }
+    bool solid(const Int3 v) const { return voxels[index(v.x, v.y, v.z)] != 0; }
+    // A cell is solid when any voxel of it inside the world is
+    bool cell_solid(const Int3 c) const {
+        for (int z = c.z * WORLD_COARSE; z < std::min((c.z + 1) * WORLD_COARSE, size.z); ++z)
+            for (int y = c.y * WORLD_COARSE; y < std::min((c.y + 1) * WORLD_COARSE, size.y); ++y)
+                for (int x = c.x * WORLD_COARSE; x < std::min((c.x + 1) * WORLD_COARSE, size.x); ++x)
+                    if (solid(Int3{x, y, z})) return true;
+        return false;
+    }
+};
+
+float unit(sim::Rng& rng) { return static_cast<float>(rng.next_below(1000000)) / 1000000.0f; }
+
+} // namespace
+
+TEST_CASE("the coarse walk gives the same answer as the voxel walk", "[voxelray][coarse]") {
+    const MarchWorld world;
+    const VolumeSolid fine = [&world](const Int3 v) { return world.solid(v); };
+    const VolumeSolid coarse = [&world](const Int3 c) { return world.cell_solid(c); };
+    constexpr int UNLIMITED = 100000;
+
+    sim::Rng rng(1234);
+    int blocked = 0;
+    long fine_steps = 0;
+    long coarse_steps = 0;
+    for (int i = 0; i < 4000; ++i) {
+        // Starting inside the world or a little way outside it, going any way,
+        // with every fourth ray on an axis or a diagonal
+        const Vector3 origin = {
+            -4.0f + unit(rng) * (static_cast<float>(world.size.x) + 8.0f),
+            -4.0f + unit(rng) * (static_cast<float>(world.size.y) + 8.0f),
+            -4.0f + unit(rng) * (static_cast<float>(world.size.z) + 8.0f),
+        };
+        Vector3 dir = {unit(rng) * 2.0f - 1.0f, unit(rng) * 2.0f - 1.0f, unit(rng) * 2.0f - 1.0f};
+        if (i % 4 == 0) dir = Vector3{static_cast<float>(i % 3) - 1.0f, 0.0f, i % 8 == 0 ? 1.0f : -1.0f};
+        if (Vector3Length(dir) < 1e-3f) continue;
+        dir = Vector3Normalize(dir);
+
+        int a = 0, b = 0;
+        const bool by_voxel = volume_march(fine, world.size, origin, dir, UNLIMITED, &a);
+        const bool by_cell = volume_march_coarse(fine, coarse, world.size, origin, dir, UNLIMITED, &b);
+        INFO("ray " << i << " from " << origin.x << ", " << origin.y << ", " << origin.z
+             << " along " << dir.x << ", " << dir.y << ", " << dir.z);
+        REQUIRE(by_cell == by_voxel);
+        blocked += by_voxel;
+        fine_steps += a;
+        coarse_steps += b;
+    }
+
+    // Both answers come up, and skipping empty cells reads fewer of them
+    REQUIRE(blocked > 500);
+    REQUIRE(blocked < 3500);
+    REQUIRE(coarse_steps < fine_steps);
+}
+
+TEST_CASE("the voxel walk agrees with the grid walk from inside", "[voxelray][coarse]") {
+    // volume_march() is the shader's walk; voxel_ray_blocked() is the older
+    // twin, which has no box to enter. Started inside the grid they match.
+    const auto palette = make_palette();
+    SingleChunkGrid grid(nullptr, palette);
+    sim::Rng rng(99);
+    for (int i = 0; i < 300; ++i) {
+        grid.set_voxel(Int3{static_cast<int>(rng.next_below(16)), static_cast<int>(rng.next_below(16)),
+                            static_cast<int>(rng.next_below(16))}, 1);
+    }
+    const VolumeSolid solid = [&grid](const Int3 v) { return grid.is_solid(v); };
+
+    for (int i = 0; i < 1000; ++i) {
+        const Vector3 origin = {unit(rng) * 16.0f, unit(rng) * 16.0f, unit(rng) * 16.0f};
+        const Vector3 dir = Vector3Normalize(Vector3{unit(rng) - 0.5f, unit(rng) - 0.5f, unit(rng) - 0.5f});
+        REQUIRE(volume_march(solid, Int3{16, 16, 16}, origin, dir, 1000, nullptr) ==
+                voxel_ray_blocked(&grid, origin, dir, 1000));
+    }
+}
+
+TEST_CASE("the coarse walk stops, lit, when its steps run out", "[voxelray][coarse]") {
+    const MarchWorld world;
+    const VolumeSolid fine = [&world](const Int3 v) { return world.solid(v); };
+    const VolumeSolid coarse = [&world](const Int3 c) { return world.cell_solid(c); };
+    // Straight down from the top into the hills: blocked with room to spare,
+    // lit with no steps at all
+    const Vector3 origin{10.5f, 10.5f, 17.5f};
+    const Vector3 down{0.0f, 0.0f, -1.0f};
+    REQUIRE(volume_march_coarse(fine, coarse, world.size, origin, down, 256, nullptr));
+    REQUIRE_FALSE(volume_march_coarse(fine, coarse, world.size, origin, down, 0, nullptr));
 }

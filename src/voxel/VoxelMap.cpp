@@ -301,7 +301,7 @@ void VoxelMap::update_models() {
     }
 }
 
-bool VoxelMap::update_volume(VoxelVolume& volume, const Int3 window_origin) {
+bool VoxelMap::update_volume(VoxelVolume& volume, VoxelVolume* coarse, const Int3 window_origin) {
     if (!volume.is_created()) return false;
 
     const Int3 window_size = volume.get_size();
@@ -328,6 +328,14 @@ bool VoxelMap::update_volume(VoxelVolume& volume, const Int3 window_origin) {
             continue;
 
         volume.upload_chunk(at, chunk->second);
+        // And the chunk's cells of the coarse volume, which may have emptied
+        // or filled with it
+        if (coarse != nullptr && coarse->is_created()) {
+            VoxelID cells[CHUNK_COARSE * CHUNK_COARSE * CHUNK_COARSE];
+            coarse_cells(chunk->second, cells);
+            coarse->upload_block(Int3{at.x / WORLD_COARSE, at.y / WORLD_COARSE, at.z / WORLD_COARSE},
+                                 Int3{CHUNK_COARSE, CHUNK_COARSE, CHUNK_COARSE}, cells);
+        }
         uploaded = true;
     }
     return uploaded;
