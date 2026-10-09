@@ -115,4 +115,14 @@ Int3 terrain_voxel_size(const sim::Terrain& terrain);
  */
 bool build_terrain_voxels(VoxelMap& map, const sim::Terrain& terrain);
 
+/**
+ * Draws one cell of `terrain` into the map as build_terrain_voxels() does, on
+ * top of what is there: for a cell that has just become land (an island
+ * placed in a running game) the map holds nothing there yet. The chunks round
+ * the cell's edges are marked for remeshing, as their faces towards it were
+ * drawn against ocean. An ocean cell draws nothing. False when part of the
+ * cell does not fit the map.
+ */
+bool draw_terrain_cell(VoxelMap& map, const sim::Terrain& terrain, int32_t cell_x, int32_t cell_y);
+
 #endif //BUSINESS_GAME_TERRAINVOXELS_HPP

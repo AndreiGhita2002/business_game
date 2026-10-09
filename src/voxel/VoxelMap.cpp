@@ -83,6 +83,18 @@ void VoxelMap::clear() {
     chunk_volume_dirty.clear();
 }
 
+void VoxelMap::mark_for_remesh(const Int3 lo, const Int3 hi) {
+    // Walked over the chunks rather than over the box, which may be most of
+    // the map tall and is mostly chunks that do not exist
+    for (const auto& [chunk_pos, chunk] : chunks) {
+        if (chunk_pos.x < lo.x || chunk_pos.y < lo.y || chunk_pos.z < lo.z ||
+            chunk_pos.x > hi.x || chunk_pos.y > hi.y || chunk_pos.z > hi.z)
+            continue;
+        chunk_was_updated[chunk_pos] = true;
+        chunk_volume_dirty[chunk_pos] = true;
+    }
+}
+
 void VoxelMap::resize(const uint32_t size_x, const uint32_t size_y, const uint32_t size_z) {
     clear();
     this->size = Int2(size_x, size_y);

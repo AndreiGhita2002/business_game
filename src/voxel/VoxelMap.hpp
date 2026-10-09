@@ -114,6 +114,12 @@ public:
     /** Drops every chunk and its model, leaving a map of air. */
     void clear();
 
+    /**
+     * Marks every chunk that exists in the box of chunk coordinates from `lo`
+     * to `hi` (both included) for remeshing and for its shadow volume.
+     */
+    void mark_for_remesh(Int3 lo, Int3 hi);
+
     /** A map of air of another size, as the constructor makes. */
     void resize(uint32_t size_x, uint32_t size_y, uint32_t size_z);
 

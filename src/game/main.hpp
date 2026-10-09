@@ -24,6 +24,8 @@
 #include "sim/Save.hpp"
 #include "sim/Simulation.hpp"
 
+class IslandMenu;
+
 namespace global {
     inline float render_distance = 128.0f;
     inline bool limit_render_distance = false;
@@ -39,6 +41,9 @@ namespace global {
     inline VoxelView* voxel_view = nullptr;
     // The water over the map, also owned by root_view's child chain
     inline WaterView* water_view = nullptr;
+    // The new island menu, owned by the UIView. A global so the button that
+    // opens it, made before it, can reach it.
+    inline IslandMenu* island_menu = nullptr;
 
     // --- Simulation ---
     // The game's state. Read through its const accessors, changed only by

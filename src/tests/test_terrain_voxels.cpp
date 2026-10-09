@@ -370,6 +370,47 @@ TEST_CASE("every block type has a colour in the map's palette", "[terrain]") {
     }
 }
 
+TEST_CASE("an island placed later is drawn in as if the map were built again", "[terrain]") {
+    // Four by two cells, a flat island on the left square; then a second on
+    // the right, drawn in a cell at a time over the map as it stands
+    sim::Terrain terrain(4, 2);
+    sim::IslandSpec spec;
+    spec.elevation = sim::Elevation::Flat;
+    REQUIRE(sim::place_island(terrain, 0, 0, spec, sim::DEFAULT_WATER_LEVEL));
+
+    const Int3 size = terrain_voxel_size(terrain);
+    VoxelMap map(nullptr, size.x, size.y, size.z);
+    REQUIRE(build_terrain_voxels(map, terrain));
+    for (auto& [chunk_pos, dirty] : map.chunk_was_updated) dirty = false;
+
+    spec.seed = 77;
+    REQUIRE(sim::place_island(terrain, 2, 0, spec, sim::DEFAULT_WATER_LEVEL));
+    for (const sim::CellPos& c : sim::island_footprint(spec.shape, spec.rotation).cells) {
+        REQUIRE(draw_terrain_cell(map, terrain, 2 + c.x, c.y));
+    }
+
+    // The same chunks with the same voxels as a map built from scratch
+    VoxelMap fresh(nullptr, size.x, size.y, size.z);
+    REQUIRE(build_terrain_voxels(fresh, terrain));
+    REQUIRE(map.chunks.size() == fresh.chunks.size());
+    for (const auto& [chunk_pos, chunk] : fresh.chunks) {
+        const auto found = map.chunks.find(chunk_pos);
+        REQUIRE(found != map.chunks.end());
+        REQUIRE(found->second == chunk);
+    }
+
+    // The first island's chunks along the shared edge are to be meshed
+    // again, as their faces towards the new cells were drawn against ocean;
+    // the ones well inside it are left alone
+    const int edge = 2 * 256 / CHUNK_SIZE - 1;   // the last chunk column of cell 1
+    bool edge_marked = false;
+    for (const auto& [chunk_pos, dirty] : map.chunk_was_updated) {
+        if (chunk_pos.x == edge && dirty) edge_marked = true;
+        if (chunk_pos.x < edge - 1) REQUIRE_FALSE(dirty);
+    }
+    REQUIRE(edge_marked);
+}
+
 TEST_CASE("a window of the map is copied out for the shadow volume", "[terrain]") {
     // Three chunks across and two tall; the window is the middle and right
     // hand columns of chunks, the bottom two chunks deep

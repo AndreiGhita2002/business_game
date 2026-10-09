@@ -28,6 +28,7 @@
 #include "ui/ShaderMenu.hpp"
 #include "ui/UINumberRow.hpp"
 #include "ui/GridTransformMenu.hpp"
+#include "ui/IslandMenu.hpp"
 #include "ui/VehiclePanel.hpp"
 
 #if defined(PLATFORM_WEB)
@@ -83,6 +84,24 @@ static uint32_t fresh_seed();
 // What the readout says about the world on screen: the island's seed, shape,
 // relief and biome, or that it was loaded
 static std::string world_description;
+
+/** The box round the land cells, in voxels of the map's x and y. */
+struct LandBox {
+    int min_x, min_y, max_x, max_y;
+    bool any() const { return max_x > min_x; }
+};
+
+/**
+ * Lays the sea floor over the ocean cells, which the voxel map does not hold,
+ * and puts the shadow window over the land: all of it when it fits one window
+ * (MAX_WORLD_VOLUME_SIDE), otherwise a window's worth round `focus` (a box in
+ * the map's voxels, x and y), or round the middle of the land with no focus.
+ * After a new world, a load, and an island placed.
+ */
+static LandBox refresh_land(const Rectangle* focus);
+
+/** What the presentation does about the last step's events: islands placed, and refused. */
+static void present_world_events();
 
 void global::init() {
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
@@ -294,7 +313,12 @@ void global::init() {
 
     // A whole new game: another island from another seed, in a world of the
     // size the settings menu says
-    add_bottom_left_button("New Island", [] { new_world(fresh_seed()); });
+    add_bottom_left_button("New World", [] { new_world(fresh_seed()); });
+
+    // Another island in this world: choose it, then place it (IslandMenu)
+    add_bottom_left_button("New Island", [] {
+        if (island_menu != nullptr) island_menu->toggle();
+    });
 
     // The selected vehicle, under the readout. Added before the menus below so
     // that it is updated before them: a click that arms one of them is then
@@ -319,6 +343,15 @@ void global::init() {
     auto editor = editor_node.get();
     ui_view->add_child(std::move(editor_node));
 
+    // The new island menu, on the left. Placing hands the island to the
+    // simulation as a command; present_world_events() draws it when it lands.
+    auto island_menu_node = std::make_unique<IslandMenu>(ui_view, voxel_view, simulation.get());
+    island_menu = island_menu_node.get();
+    island_menu->on_place = [](const int32_t cell_x, const int32_t cell_y, const sim::IslandSpec& spec) {
+        commands.submit(std::make_unique<sim::PlaceIsland>(cell_x, cell_y, spec));
+    };
+    ui_view->add_child(std::move(island_menu_node));
+
     // Both act on a click in the world, so only one of them may be armed at a
     // time: otherwise a single click would be read as a voxel to place and as a
     // grid to pick at once. Each switches the other off as it is armed, which
@@ -342,15 +375,21 @@ void global::init() {
 
     transform_menu->on_activate = [editor] {
         editor->select(NO_VOXEL_SELECTION);
+        island_menu->cancel_placing();
     };
     editor->on_select = [transform_menu] {
+        transform_menu->cancel();
+        island_menu->cancel_placing();
+    };
+    island_menu->on_activate = [editor, transform_menu] {
+        editor->select(NO_VOXEL_SELECTION);
         transform_menu->cancel();
     };
 
     // A free click on a car selects it, but only when neither of those two is
     // waiting on the click for itself
     vehicle_panel->world_click_taken = [transform_menu, editor] {
-        return transform_menu->is_active() || editor->is_active();
+        return transform_menu->is_active() || editor->is_active() || island_menu->is_placing();
     };
 
     // An entity's grids are deleted when it leaves the camera's range, and
@@ -391,6 +430,7 @@ void global::shutdown() {
     root_view.reset();
     voxel_view = nullptr;
     water_view = nullptr;
+    island_menu = nullptr;
 
     assets.reset();
     simulation.reset();
@@ -413,6 +453,7 @@ void global::mainLoop() {
     while (tick_accumulator >= tick_length && ticks_run < MAX_TICKS_PER_FRAME) {
         simulation->step(commands.take(simulation->tick()));
         entities->on_tick(*simulation);
+        present_world_events();
         tick_accumulator -= tick_length;
         ticks_run++;
     }
@@ -479,41 +520,13 @@ void global::start_world() {
     map.resize(static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y), static_cast<uint32_t>(size.z));
     build_terrain_voxels(map, terrain);
 
-    // The box round the land cells, and a square of sea floor for every ocean
-    // cell, which the map does not hold. How tall the land gets is the map's
-    // highest voxel, now that the land is drawn into it.
-    const int cell_voxels = terrain.cell_blocks() * BLOCK_VOXELS;
-    const int land_top = map.solid_top();
-    int land_min_x = size.x, land_min_y = size.y, land_max_x = 0, land_max_y = 0;
-    std::vector<WaterChunk> floor;
-    for (int cell_y = 0; cell_y < terrain.cells_y(); ++cell_y) {
-        for (int cell_x = 0; cell_x < terrain.cells_x(); ++cell_x) {
-            const int x = cell_x * cell_voxels;
-            const int y = cell_y * cell_voxels;
-            if (terrain.is_ocean_cell(cell_x, cell_y)) {
-                floor.push_back(WaterChunk{static_cast<float>(x), static_cast<float>(y),
-                                           static_cast<float>(cell_voxels), static_cast<float>(cell_voxels)});
-                continue;
-            }
-            land_min_x = std::min(land_min_x, x);
-            land_min_y = std::min(land_min_y, y);
-            land_max_x = std::max(land_max_x, x + cell_voxels);
-            land_max_y = std::max(land_max_y, y + cell_voxels);
-        }
-    }
-    const bool any_land = land_max_x > land_min_x;
-
-    // Shadows over the land only. The ocean is flat and drawn by the water
-    // view, so nothing there casts or catches a shadow from the volume.
-    if (any_land) {
-        voxel_view->set_volume_window(Int3{land_min_x, land_min_y, 0},
-            Int3{land_max_x - land_min_x, land_max_y - land_min_y, land_top});
-    } else {
-        voxel_view->set_volume_window(Int3{0, 0, 0}, Int3{CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE});
-    }
-
+    // The water over the whole world, and the sea floor and the shadows over
+    // what is ocean and what is land
     water_view->set_area(size.x, size.y);
-    water_view->set_floor(std::move(floor), static_cast<float>(terrain.sea_floor() * BLOCK_VOXELS));
+    const LandBox land = refresh_land(nullptr);
+    const bool any_land = land.any();
+    const int cell_voxels = terrain.cell_blocks() * BLOCK_VOXELS;
+    const int land_min_x = land.min_x, land_min_y = land.min_y, land_max_x = land.max_x, land_max_y = land.max_y;
 
     // The camera over the middle of the land, or of the world, far enough
     // back to see the whole island. The map's matrix carries the point from
@@ -534,6 +547,91 @@ void global::start_world() {
         const sim::IslandSpec spec = sim::random_island_spec(world_seed);
         world_description += TextFormat(": %s, %s, %s", sim::island_shape_name(spec.shape),
                                         sim::elevation_name(spec.elevation), sim::biome_name(spec.biome));
+    }
+}
+
+static LandBox refresh_land(const Rectangle* focus) {
+    using namespace global;
+    const sim::Terrain& terrain = simulation->terrain();
+    VoxelMap& map = *voxel_view->game_map;
+    const int cell_voxels = terrain.cell_blocks() * BLOCK_VOXELS;
+
+    LandBox land{map.get_size().x, map.get_size().y, 0, 0};
+    std::vector<WaterChunk> floor;
+    for (int cell_y = 0; cell_y < terrain.cells_y(); ++cell_y) {
+        for (int cell_x = 0; cell_x < terrain.cells_x(); ++cell_x) {
+            const int x = cell_x * cell_voxels;
+            const int y = cell_y * cell_voxels;
+            if (terrain.is_ocean_cell(cell_x, cell_y)) {
+                floor.push_back(WaterChunk{static_cast<float>(x), static_cast<float>(y),
+                                           static_cast<float>(cell_voxels), static_cast<float>(cell_voxels)});
+                continue;
+            }
+            land.min_x = std::min(land.min_x, x);
+            land.min_y = std::min(land.min_y, y);
+            land.max_x = std::max(land.max_x, x + cell_voxels);
+            land.max_y = std::max(land.max_y, y + cell_voxels);
+        }
+    }
+    water_view->set_floor(std::move(floor), static_cast<float>(terrain.sea_floor() * BLOCK_VOXELS));
+
+    // Shadows over the land only. The ocean is flat and drawn by the water
+    // view, so nothing there casts or catches a shadow from the volume. Land
+    // wider than one window keeps the window round the focus: islands far
+    // from it cast no shadow until one near them is placed.
+    if (!land.any()) {
+        voxel_view->set_volume_window(Int3{0, 0, 0}, Int3{CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE});
+        return land;
+    }
+    const auto fit = [](const int lo, const int hi, const float focus_centre, int* origin, int* extent) {
+        if (hi - lo <= MAX_WORLD_VOLUME_SIDE) {
+            *origin = lo;
+            *extent = hi - lo;
+            return;
+        }
+        const int centre = static_cast<int>(focus_centre);
+        *origin = std::clamp(centre - MAX_WORLD_VOLUME_SIDE / 2, lo, hi - MAX_WORLD_VOLUME_SIDE);
+        *extent = MAX_WORLD_VOLUME_SIDE;
+    };
+    int origin_x = 0, origin_y = 0, extent_x = 0, extent_y = 0;
+    fit(land.min_x, land.max_x,
+        focus != nullptr ? focus->x + focus->width * 0.5f : 0.5f * static_cast<float>(land.min_x + land.max_x),
+        &origin_x, &extent_x);
+    fit(land.min_y, land.max_y,
+        focus != nullptr ? focus->y + focus->height * 0.5f : 0.5f * static_cast<float>(land.min_y + land.max_y),
+        &origin_y, &extent_y);
+    // As tall as the land gets, the map's highest voxel now it is drawn
+    voxel_view->set_volume_window(Int3{origin_x, origin_y, 0}, Int3{extent_x, extent_y, map.solid_top()});
+    return land;
+}
+
+static void present_world_events() {
+    using namespace global;
+    for (const sim::Event& event : simulation->events()) {
+        if (const auto* placed = std::get_if<sim::IslandPlaced>(&event)) {
+            // The new land drawn into the map, cell by cell: the rest of the
+            // map is as it was, and the chunks round the new cells are
+            // marked for remeshing as they are drawn
+            const sim::Terrain& terrain = simulation->terrain();
+            const sim::Footprint footprint =
+                sim::island_footprint(static_cast<sim::IslandShape>(placed->shape), placed->rotation);
+            for (const sim::CellPos& c : footprint.cells) {
+                draw_terrain_cell(*voxel_view->game_map, terrain, placed->cell_x + c.x, placed->cell_y + c.y);
+            }
+
+            // The sea floor and the shadows, the window round the new island
+            const float cell_voxels = static_cast<float>(terrain.cell_blocks() * BLOCK_VOXELS);
+            const Rectangle focus{
+                static_cast<float>(placed->cell_x) * cell_voxels, static_cast<float>(placed->cell_y) * cell_voxels,
+                static_cast<float>(footprint.width) * cell_voxels, static_cast<float>(footprint.height) * cell_voxels,
+            };
+            refresh_land(&focus);
+            show_status("island placed");
+        } else if (const auto* rejected = std::get_if<sim::CommandRejected>(&event)) {
+            // The island was fine when it was placed, but something got there
+            // first in the tick between
+            if (rejected->reason == sim::RejectReason::InvalidIsland) show_status("the island did not fit there");
+        }
     }
 }
 

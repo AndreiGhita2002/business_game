@@ -77,7 +77,8 @@ needs nothing from the game side:
 - `test_sim_core.cpp` - `Fixed`, `Pool` and its handles, `ByteWriter` /
   `ByteReader`, and `Rng` (pinned to the reference PCG32 output).
 - `test_sim_routes.cpp` - what makes a route, and where a distance lands on one.
-- `test_sim_simulation.cpp` - `step()`: commands in, vehicles moving, events and
+- `test_sim_simulation.cpp` - `step()`: commands in, vehicles moving, islands
+  placed and refused (and `PlaceIsland` through bytes), events and
   refusals out, and the (player, sequence) order.
 - `test_sim_save.cpp` - a saved game loading with the same checksum and then
   ticking on in step with the original, queued commands running after a load,
@@ -179,7 +180,7 @@ Rules the simulation keeps, and that anything added to it must keep:
   because the std distributions differ between standard libraries).
 - **Every change is a command.** `sim::Command` is a class per action
   (`AddRoute`, `SpawnVehicle`, `DespawnVehicle`, `SetVehicleSpeed`,
-  `SetWaterLevel`) with
+  `SetWaterLevel`, `PlaceIsland`) with
   `apply(World&)`, `write_payload()` and `clone()`. A new one also needs a
   `CommandType` number (the wire format, so never reused) and a case in
   `read_payload()` in `Command.cpp`. `World` is the mutable state and only a
@@ -190,7 +191,7 @@ Rules the simulation keeps, and that anything added to it must keep:
   submit time, a few ticks ahead, and send it to everyone.
 - `step()` applies a tick's commands sorted by (player, sequence), refusing
   bad ones with a `CommandRejected` event, then advances the systems. Events
-  (`RouteAdded`, `VehicleSpawned`, `VehicleDespawned`) are for discrete changes
+  (`RouteAdded`, `VehicleSpawned`, `VehicleDespawned`, `IslandPlaced`) are for discrete changes
   and last one step; continuous state is read, not pushed.
 - `Simulation::checksum()` is FNV-1a over `write_state()`, which writes the
   whole state including the pools' slot bookkeeping. Anything left out of
@@ -276,8 +277,12 @@ across, z up, each `BLOCK_SIZE` units on a side. It is the gameplay grid. See
 - `Simulation(seed, TerrainSettings)` generates it, `World::terrain` holds it,
   `Simulation::terrain()` reads it, and it is in `write_state()` and so in the
   checksum (a land cell is a quarter of a megabyte, written in one copy).
-  Nothing changes it after generation yet: there is no command for it, and an
-  island bought during play would want one (`PlaceIsland`).
+  **`PlaceIsland`** (CommandType 6) is the one command that changes it: an
+  `IslandSpec` and the cell for the footprint's corner, generated inside the
+  step with `place_island()` so only the spec travels; refused as
+  `InvalidIsland` off the world or over land, and announced with
+  `IslandPlaced` (the corner, shape and turn, so the presentation can work out
+  the cells).
 - `column_height()` (blocks) and `ground_level()` (units, for a point) are
   what anything that sits on the ground asks.
 
@@ -297,6 +302,10 @@ square root), and a vehicle drives round one at a fixed speed per tick.
   chunks it makes as it goes. Ocean cells are left out: the WaterView draws
   their sea floor as a plane, which is what keeps a world map's chunks down to
   its islands. A terrain bigger than the map is cut off, and reported.
+  `draw_terrain_cell()` is the same for one cell, over the map as it stands,
+  for an island placed during a game; it marks the chunks round the cell's
+  edges for remeshing (`VoxelMap::mark_for_remesh()`), as their faces towards
+  it were drawn against ocean. A test holds it to a map built from scratch.
 - **Block detail**, purely visual, from each block's four side neighbours and
   the blocks above and below it (`block_detail()` -> `BlockDetail`, side
   masks `SIDE_X_POS` and so on). It softens the block grid without hiding it:
@@ -798,6 +807,20 @@ buttons.
   queue commands rather than touching anything. The selection is a simulation
   handle, so it survives the car leaving range. Added to the UI before the
   transform menu and the editor so that it is updated before them.
+- **IslandMenu** (`src/ui/IslandMenu.cpp/hpp`) - Opened by the "New Island"
+  button, on the left: the island's shape, turn, elevation, biome and seed as
+  buttons that each cycle their choice, "Random" to draw them all from a fresh
+  seed, and "Place". Placing makes the footprint follow the mouse over the
+  sea (a ray from the camera met with the water's surface, in the map's own
+  space), centred on the cell under it, and highlights its cells as boxes
+  from the sea floor to above the water: green where it fits, red where it
+  hangs off the world or over land. R turns it, a left click places it (and
+  closes the menu), Esc or a right click goes back to the choices; the panel
+  stays up while placing, so a choice changed shows at once. Placing only
+  calls `on_place`, which `main.cpp` turns into a `sim::PlaceIsland`. One of
+  the world click tools: it stands the editor and the transform menu down as
+  it starts placing, they cancel its placing as they start, and the vehicle
+  panel leaves clicks alone while it places.
 - **VoxelEditor** (`src/ui/VoxelEditor.cpp/hpp`) - A UINode panel in the bottom
   right holding a table of `VoxelPaletteCell`s, one per colour in the grid's
   `voxel_colours` map plus a deselect cell. Pick a colour, then left click the
@@ -883,9 +906,16 @@ makes a world from a fresh seed (`std::random_device`), `world_cells_x` by
 `start_world()` fits everything drawn to the simulation's terrain: the map
 resized and drawn, the shadow window over the land, the water's area and the
 ocean cells' sea floor, and the camera over the middle of the land. It runs
-after a load too. The "New Island" button (bottom left) calls `new_world()`,
+after a load too. The "New World" button (bottom left) calls `new_world()`,
 which replaces the game as a load does; the game settings menu's "world cells
-x/y" rows set the size it uses. A readout under the title shows the world's
+x/y" rows set the size it uses. The "New Island" button opens the IslandMenu,
+which adds an island to the world as it stands. After every step
+`present_world_events()` reacts to the simulation's events: an `IslandPlaced`
+has its cells drawn into the map (`draw_terrain_cell()`, the chunks round
+them marked for remeshing) and `refresh_land()` lays the sea floor again and
+puts the shadow window over the land, round the new island when the land is
+wider than one window; an `InvalidIsland` refusal shows in the readout.
+`refresh_land()` is what `start_world()` uses for the same two things. A readout under the title shows the world's
 seed, shape, elevation and biome ("loaded game" after a load, as the seed is
 not saved), and for a few seconds how a save or a load went.
 
@@ -939,6 +969,12 @@ take the narrow header instead of dragging in the window and the view tree.
   only by `test_terrain_voxels.cpp` now (in `includes/`)
 
 ## Known Issues (from TODOs in code)
+
+- The shadow window is at most `MAX_WORLD_VOLUME_SIDE` (1024 voxels, four
+  cells) across. Land spread wider than that keeps the window round the last
+  island placed (or the middle of the land after a load), and islands outside
+  it cast no shadow. A window that follows the camera (phase 4 of the
+  lighting plan) is the proper answer.
 
 - **Vehicle performance, for after the next vehicle pass** (Andrei's call,
   from the performance review): `TODO(claude)` comments in

@@ -117,6 +117,8 @@ add_library(business_game_lib STATIC
         src/ui/SettingsPanel.cpp
         src/ui/SettingsPanel.hpp
         src/ui/GridTransformMenu.cpp
+        src/ui/IslandMenu.cpp
+        src/ui/IslandMenu.hpp
         src/ui/GridTransformMenu.hpp
         src/ui/ShaderMenu.cpp
         src/ui/ShaderMenu.hpp
