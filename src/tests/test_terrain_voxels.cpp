@@ -4,6 +4,8 @@
 
 #include "TestHelpers.hpp"
 
+#include <algorithm>
+
 #include "PerlinNoise.hpp"
 #include "entity/SimConvert.hpp"
 #include "entity/TerrainVoxels.hpp"
@@ -67,9 +69,10 @@ TEST_CASE("a terrain is drawn into the map a block to a cube of voxels", "[terra
     terrain.set(0, 0, 1, sim::BlockType::Grass);
     terrain.set(2, 1, 0, sim::BlockType::Dirt);
 
-    const Int2 size = terrain_voxel_size(terrain);
+    const Int3 size = terrain_voxel_size(terrain);
     REQUIRE(size.x == 3 * BLOCK_VOXELS);
     REQUIRE(size.y == 2 * BLOCK_VOXELS);
+    REQUIRE(size.z == 2 * BLOCK_VOXELS);
 
     // Two chunks across, so the terrain is not all in one of them, and one
     // voxel left over from before that has to go
@@ -105,7 +108,7 @@ TEST_CASE("a terrain is drawn into the map a block to a cube of voxels", "[terra
 }
 
 TEST_CASE("a terrain bigger than the map is drawn as far as it fits", "[terrain]") {
-    // Five blocks tall is 20 voxels, and a map is one chunk (16) tall
+    // Five blocks tall is 20 voxels, and this map is one chunk (16) tall
     sim::Terrain terrain(2, 2, 5);
     for (int z = 0; z < 5; ++z) terrain.set(0, 0, z, sim::BlockType::Stone);
     // And past the map's edge on x
@@ -118,15 +121,54 @@ TEST_CASE("a terrain bigger than the map is drawn as far as it fits", "[terrain]
     REQUIRE(*map.get_voxel(Int3{5, 0, 0}) == DIRT_VOXEL);
 }
 
-TEST_CASE("the game's map comes out at the size it used to be", "[terrain]") {
+TEST_CASE("the game's map is 128 voxels on every side", "[terrain]") {
     // The water, the camera and the test routes were all laid out for a 128
-    // voxel map one chunk tall
+    // voxel map, and it is 128 tall since the map could have more chunks than one
     const sim::Terrain terrain = sim::generate_terrain(sim::TerrainSettings{});
-    const Int2 size = terrain_voxel_size(terrain);
+    const Int3 size = terrain_voxel_size(terrain);
     REQUIRE(size.x == 128);
     REQUIRE(size.y == 128);
-    REQUIRE(terrain.size_z() * BLOCK_VOXELS <= CHUNK_SIZE);
+    REQUIRE(size.z == 128);
 
-    VoxelMap map(nullptr, size.x, size.y);
+    VoxelMap map(nullptr, size.x, size.y, size.z);
+    REQUIRE(map.get_height() == 128);
+    REQUIRE(map.get_chunk_count() == Int3{8, 8, 8});
     REQUIRE(build_terrain_voxels(map, terrain));
+
+    // The shadow volume is cut off at the highest block there is
+    int highest = 0;
+    for (int x = 0; x < terrain.size_x(); ++x)
+        for (int y = 0; y < terrain.size_y(); ++y)
+            highest = std::max(highest, terrain.column_height(x, y));
+    REQUIRE(map.solid_top() == highest * BLOCK_VOXELS);
+}
+
+TEST_CASE("a map several chunks tall", "[terrain]") {
+    VoxelMap map(nullptr, 16, 16, 40);
+    REQUIRE(map.get_height() == 40);
+    // 40 is two chunks and a part
+    REQUIRE(map.get_chunk_count() == Int3{1, 1, 3});
+    REQUIRE(map.solid_top() == 0);
+
+    REQUIRE(map.in_bounds(Int3{0, 0, 39}));
+    REQUIRE_FALSE(map.in_bounds(Int3{0, 0, 40}));
+    REQUIRE_FALSE(map.set_voxel(Int3{0, 0, 40}, 1));
+
+    // A voxel in the upper chunk lands there and nowhere else
+    for (auto& [chunk_pos, dirty] : map.chunk_was_updated) dirty = false;
+    REQUIRE(map.set_voxel(Int3{3, 4, 35}, 2));
+    REQUIRE(*map.get_voxel(Int3{3, 4, 35}) == 2);
+    REQUIRE(*map.get_voxel(Int3{3, 4, 3}) == 0);
+    REQUIRE(*map.get_voxel(Int3{3, 4, 19}) == 0);
+    REQUIRE(map.solid_top() == 36);
+    REQUIRE(map.chunk_was_updated[Int3{0, 0, 2}]);
+    REQUIRE_FALSE(map.chunk_was_updated[Int3{0, 0, 0}]);
+
+    // On a chunk's bottom layer, the chunk under it is remeshed too, as its
+    // top faces and corners read across the border
+    for (auto& [chunk_pos, dirty] : map.chunk_was_updated) dirty = false;
+    REQUIRE(map.set_voxel(Int3{3, 4, 16}, 2));
+    REQUIRE(map.chunk_was_updated[Int3{0, 0, 1}]);
+    REQUIRE(map.chunk_was_updated[Int3{0, 0, 0}]);
+    REQUIRE_FALSE(map.chunk_was_updated[Int3{0, 0, 2}]);
 }

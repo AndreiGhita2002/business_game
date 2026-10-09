@@ -316,11 +316,13 @@ TEST_CASE("a voxel map survives a save and a load", "[voxelfile][file]") {
     const std::string path = dir.file("world.bgvox");
 
     {
-        // Two chunks across, one deep, air but for the three voxels set here
-        VoxelMap map(nullptr, 32, 16);
+        // Two chunks across, one deep and two tall, air but for the voxels
+        // set here
+        VoxelMap map(nullptr, 32, 16, 32);
         REQUIRE(map.set_voxel(Int3{0, 0, 0}, 1));
         REQUIRE(map.set_voxel(Int3{20, 3, 5}, 2));
         REQUIRE(map.set_voxel(Int3{31, 15, 15}, 3));
+        REQUIRE(map.set_voxel(Int3{17, 2, 30}, 4));
         REQUIRE(voxel_file::save_grid(&map, path, "world", "the map"));
     }
 
@@ -331,11 +333,14 @@ TEST_CASE("a voxel map survives a save and a load", "[voxelfile][file]") {
     const Int2 size = loaded->get_size();
     REQUIRE(size.x == 32);
     REQUIRE(size.y == 16);
+    REQUIRE(static_cast<VoxelMap*>(loaded)->get_height() == 32);
 
     REQUIRE(*loaded->get_voxel(Int3{0, 0, 0}) == 1);
     REQUIRE(*loaded->get_voxel(Int3{20, 3, 5}) == 2);
     REQUIRE(*loaded->get_voxel(Int3{31, 15, 15}) == 3);
+    REQUIRE(*loaded->get_voxel(Int3{17, 2, 30}) == 4);
     REQUIRE(*loaded->get_voxel(Int3{10, 10, 10}) == 0);
+    REQUIRE(*loaded->get_voxel(Int3{10, 10, 20}) == 0);
 
     voxel_file::delete_grid_tree(loaded);
 }

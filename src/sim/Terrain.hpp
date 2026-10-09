@@ -41,7 +41,8 @@ struct TerrainSettings {
     // In blocks
     int32_t size_x = 32;
     int32_t size_y = 32;
-    int32_t size_z = 4;
+    // 128 units, so 128 voxels on screen
+    int32_t size_z = 32;
     // The seed of the noise's permutation, not of the simulation's Rng: the
     // terrain is the same whatever the game's seed is, until a game wants
     // otherwise. 123456 is what the presentation's terrain always used.

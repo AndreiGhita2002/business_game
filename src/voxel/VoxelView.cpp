@@ -69,8 +69,12 @@ void VoxelView::bindWorldVolume() const {
     const Matrix map_matrix = transform_to_matrix(game_map->get_world_transform());
     SetShaderValueMatrix(*voxel_shader, world_to_volume_loc, MatrixInvert(map_matrix));
 
+    // Cut off at the top of the ground: nothing above it can block a ray, so a
+    // ray leaving this shorter box is exactly as lit as one leaving the whole
+    // volume, without the walk through the sky in between. Never below one
+    // layer, so the box is never empty.
     const Int3 size = world_volume.get_size();
-    const int s_size[3] = {size.x, size.y, size.z};
+    const int s_size[3] = {size.x, size.y, std::clamp(world_volume_top, 1, size.z)};
     SetShaderValue(*voxel_shader, volume_size_loc, s_size, SHADER_UNIFORM_IVEC3);
 
     // The atlas stays on its own unit for the whole frame. Which bricks in it
@@ -191,7 +195,7 @@ void VoxelView::updateVoxelMesh() const {
 
 void VoxelView::updateVolumes() {
     // The map's voxels, which every shadow ray is traced against
-    game_map->update_volume(world_volume);
+    if (game_map->update_volume(world_volume)) world_volume_top = game_map->solid_top();
 
     // And a brick for every other grid. A grid keeps its slot for as long as it
     // lives and hands it back in its destructor, so this only ever hands out
@@ -225,14 +229,17 @@ void VoxelView::release_grid_volume(const int slot) {
     grid_atlas.release_slot(slot);
 }
 
-VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader, const Int2 map_size)
+VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader, const Int3 map_size)
     : ViewNode(parent), voxel_shader(shader)
 {
-    // Camera
+    // Camera. Just off the map's corner and above the hills there, which a map
+    // with ground up to 128 voxels tall would otherwise put it inside of.
+    // Close enough to the near corner of the test routes that the cars on it
+    // are inside EntityManager's realise radius from the first frame.
     camera = {
         {
-            { 10.0f, 5.0f, 0.0f },
-            { 0.0f, 0.0f, 0.0f },
+            { -8.0f, 40.0f, -8.0f },
+            { 32.0f, 0.0f, 32.0f },
             { 0.0f, 1.0f, 0.0f },
             45.0f,
             0
@@ -267,14 +274,16 @@ VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader, const Int2 map_si
     // Voxels
     voxel_grids = std::vector<VoxelGrid*>();
 
-    game_map = new VoxelMap(this, static_cast<uint32_t>(map_size.x), static_cast<uint32_t>(map_size.y));
+    game_map = new VoxelMap(this, static_cast<uint32_t>(map_size.x), static_cast<uint32_t>(map_size.y),
+                            static_cast<uint32_t>(map_size.z));
     voxel_grids.emplace_back(game_map);
 
     // The voxels the shadow rays are traced against. Sized to whole chunks
     // rather than to the map, so that a chunk upload can never hang over the
     // edge of the texture. The map fills it on the first update.
-    const Int2 chunk_count = game_map->get_chunk_count();
-    world_volume.create(Int3{chunk_count.x * CHUNK_SIZE, chunk_count.y * CHUNK_SIZE, CHUNK_SIZE});
+    const Int3 chunk_count = game_map->get_chunk_count();
+    world_volume.create(Int3{chunk_count.x * CHUNK_SIZE, chunk_count.y * CHUNK_SIZE,
+                             chunk_count.z * CHUNK_SIZE});
 
     // A brick each for every other grid, so that a vehicle casts a shadow and
     // shadows itself. Slots are handed out as the grids are first uploaded.

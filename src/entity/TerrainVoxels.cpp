@@ -19,8 +19,9 @@ VoxelID block_voxel(const sim::BlockType type, const Int3 in_block) {
     return 0;
 }
 
-Int2 terrain_voxel_size(const sim::Terrain& terrain) {
-    return Int2{terrain.size_x() * BLOCK_VOXELS, terrain.size_y() * BLOCK_VOXELS};
+Int3 terrain_voxel_size(const sim::Terrain& terrain) {
+    return Int3{terrain.size_x() * BLOCK_VOXELS, terrain.size_y() * BLOCK_VOXELS,
+                terrain.size_z() * BLOCK_VOXELS};
 }
 
 bool build_terrain_voxels(VoxelMap& map, const sim::Terrain& terrain) {
@@ -66,10 +67,10 @@ bool build_terrain_voxels(VoxelMap& map, const sim::Terrain& terrain) {
     }
 
     if (!all_fit) {
-        const Int2 needed = terrain_voxel_size(terrain);
+        const Int3 needed = terrain_voxel_size(terrain);
         const Int2 size = map.get_size();
         TraceLog(LOG_WARNING, "TERRAIN: %i x %i x %i voxels of terrain do not fit a %i x %i x %i map",
-                 needed.x, needed.y, terrain.size_z() * BLOCK_VOXELS, size.x, size.y, CHUNK_SIZE);
+                 needed.x, needed.y, needed.z, size.x, size.y, map.get_height());
     }
     return all_fit;
 }

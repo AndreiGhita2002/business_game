@@ -50,6 +50,11 @@ public:
     // The map's voxels on the GPU, which is what the lighting shader walks when
     // it traces a shadow ray.
     VoxelVolume world_volume;
+    // How much of it, from the bottom up, holds anything: the map's
+    // solid_top(), refreshed whenever a chunk is uploaded. The shader is told
+    // the volume ends there, so a shadow ray stops at the top of the ground
+    // instead of walking all the empty sky above it to the ceiling.
+    int world_volume_top = 0;
 
     // Every other grid's voxels, a brick each. These are traced after the world
     // volume, so a vehicle casts a shadow onto the terrain, onto other
@@ -69,10 +74,11 @@ public:
     void render() override;
 
     /**
-     * @param map_size: the map's size in voxels. It starts as air; the game
-     *        draws the simulation's terrain into it, see entity/TerrainVoxels.hpp.
+     * @param map_size: the map's size in voxels, z up. It starts as air; the
+     *        game draws the simulation's terrain into it, see
+     *        entity/TerrainVoxels.hpp.
      */
-    VoxelView(ViewNode* parent, raylib::Shader* shader, Int2 map_size);
+    VoxelView(ViewNode* parent, raylib::Shader* shader, Int3 map_size);
 
     /**
      * Deletes the grids still in voxel_grids, which by then should only be the

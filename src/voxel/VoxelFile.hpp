@@ -21,7 +21,7 @@ class VoxelView;
  * how many grids there are, then every grid's readable header, then every grid's
  * binary body in the same order.
  *
- *   BGVOX 3                      <- magic and format version, always line one
+ *   BGVOX 4                      <- magic and format version, always line one
  *   grid_count: 2
  *   voxel_bytes: 1
  *   chunk_size: 16
@@ -87,7 +87,9 @@ namespace voxel_file {
 
 // First line of every file: MAGIC, a space, then the format version.
 inline constexpr char MAGIC[] = "BGVOX";
-inline constexpr int FORMAT_VERSION = 3;
+// 4: a VoxelMap's body carries its height and each chunk's z, as a map can be
+// more than one chunk tall
+inline constexpr int FORMAT_VERSION = 4;
 // Opens each grid's header block.
 inline constexpr char GRID_MARKER[] = "--- GRID ---";
 // The line that closes the readable part of the file.

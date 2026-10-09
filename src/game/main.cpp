@@ -195,13 +195,13 @@ void global::init() {
     auto settings_menu = settings_menu_node.get();
     settings_menu->bounds = Rectangle{settings_x, UI_MARGIN + UI_BUTTON_HEIGHT + UI_BUTTON_GAP, 0.0f, 0.0f};
 
-    // The highest voxel layer the water fills, up to the tallest the terrain
-    // goes. It is the simulation's, so the row reads it from there and changes
-    // it with a command, which lands on the next tick.
+    // The highest voxel layer the water fills, up to the top of the map. It is
+    // the simulation's, so the row reads it from there and changes it with a
+    // command, which lands on the next tick.
     settings_menu->add_int_row("water level",
         [] { return static_cast<int>(simulation->water_level()); },
         [](const int level) { commands.submit(std::make_unique<sim::SetWaterLevel>(level)); },
-        1, sim::MIN_WATER_LEVEL, CHUNK_SIZE - 1);
+        1, sim::MIN_WATER_LEVEL, voxel_view->game_map->get_height() - 1);
 
     ui_view->add_child(std::move(settings_menu_node));
 

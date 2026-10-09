@@ -55,7 +55,9 @@ uniform sampler3D worldVolume;
 // World space into the volume's model space. The axis swap back into grid
 // order is done below, in to_voxel().
 uniform mat4 worldToVolume;
-// Size of the volume in voxels, so a ray knows when it has left the world
+// Size of the volume in voxels, so a ray knows when it has left the world. z
+// stops at the top of the ground rather than at the top of the texture, see
+// VoxelView::world_volume_top: there is nothing above it to hit.
 uniform ivec3 volumeSize;
 
 // The grids that are not the map: one brick of the atlas each, one chunk on a

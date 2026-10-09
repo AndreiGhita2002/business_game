@@ -30,7 +30,8 @@ constexpr int TICKS_PER_SECOND = 20;
  * A level is a voxel layer: the water fills layers 0 to the level, one layer
  * per unit of z. 0 is the lowest because layer 0 is the bottom of the world.
  */
-constexpr int32_t DEFAULT_WATER_LEVEL = 1;
+// 4 is one unit over the lowest ground, which is a block (4 units) tall.
+constexpr int32_t DEFAULT_WATER_LEVEL = 4;
 constexpr int32_t MIN_WATER_LEVEL = 0;
 
 /**

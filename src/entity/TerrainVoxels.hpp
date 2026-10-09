@@ -41,8 +41,8 @@ constexpr VoxelID GRASS_VOXEL = 2;    // DARKGREEN
  */
 VoxelID block_voxel(sim::BlockType type, Int3 in_block);
 
-/** How many voxels across a map has to be to hold `terrain`. */
-Int2 terrain_voxel_size(const sim::Terrain& terrain);
+/** How many voxels a map has to be on each axis (z up) to hold `terrain`. */
+Int3 terrain_voxel_size(const sim::Terrain& terrain);
 
 /**
  * Empties the map and draws `terrain` into it, block (x, y, z) at voxels
@@ -50,8 +50,7 @@ Int2 terrain_voxel_size(const sim::Terrain& terrain);
  * for its shadow volume.
  *
  * A map smaller than the terrain gets what fits, which is reported by
- * returning false: the map is one chunk tall, so that includes a terrain more
- * than CHUNK_SIZE / BLOCK_VOXELS blocks high.
+ * returning false.
  */
 bool build_terrain_voxels(VoxelMap& map, const sim::Terrain& terrain);
 

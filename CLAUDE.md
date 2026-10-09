@@ -210,8 +210,10 @@ z up, each `BLOCK_SIZE` units on a side. It is the gameplay grid.
 - `generate_terrain(TerrainSettings)` takes one noise sample per column, at its
   middle, and scales it so a sample of 1 reaches the top of the world. The top
   block is grass, `dirt_depth` blocks of dirt under it, stone below that, and
-  every column keeps at least its bottom block. The defaults are 32x32x4 blocks
-  from seed 123456, the old voxel terrain's map and seed.
+  every column keeps at least its bottom block. The defaults are 32x32x32 blocks
+  (128 voxels on every side) from seed 123456, the old voxel terrain's seed.
+  The noise rarely passes 0.7, so the ground tops out around 23 blocks and
+  about half the columns are a single block.
 - `sim::PerlinNoise` is a port of `siv::PerlinNoise` (`includes/`) to `Fixed`:
   the same permutation from the same seed (it shuffles with `std::mt19937` and
   a plain modulo, both exactly specified) and the same maths, so it agrees with
@@ -234,9 +236,8 @@ square root), and a vehicle drives round one at a fixed speed per tick.
   brown, grass brown with its top voxel layer green (`block_voxel()`). This is
   where a block will get more detail than the simulation gives it. The
   VoxelView is built at `terrain_voxel_size()`, and `build_terrain_voxels()`
-  empties the map, writes every block and marks every chunk dirty. The map is
-  one chunk (16 voxels) tall, so a terrain taller than 4 blocks is cut off, and
-  reported.
+  empties the map, writes every block and marks every chunk dirty. A terrain
+  bigger than the map is cut off, and reported.
 
 - `Entity` is a simulation object made visible: a grid tree it owns, plus
   cosmetic `Script`s. `on_tick()` copies what the simulation says after every
@@ -280,7 +281,7 @@ The UI/scene uses a `ViewNode` tree hierarchy with recursive update/render trave
 ### Voxel System
 
 **VoxelGrid** (abstract base in `src/voxel/VoxelGrid.hpp`) has two implementations:
-- **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks), one chunk tall. It starts as air: the terrain is the simulation's, drawn in by `entity/TerrainVoxels`
+- **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks keyed by `Int3`), any number of chunks tall (`get_height()`; the game's is 128 voxels, 8 chunks). It starts as air: the terrain is the simulation's, drawn in by `entity/TerrainVoxels`
 - **SingleChunkGrid** (`src/voxel/SingleChunkGrid.cpp/hpp`) - Single chunk for the voxel editor
 
 **VoxelMesher** (`src/voxel/VoxelMesher.cpp/hpp`) converts voxel data to 3D
@@ -307,7 +308,11 @@ texture, one byte each, for the lighting shader to trace shadow rays through.
 `VoxelMap::update_volume()` uploads the chunks that have changed, tracked by
 `chunk_volume_dirty` because the mesh and the volume are brought up to date by
 different calls. This is the one file that calls OpenGL directly: rlgl has no 3D
-textures.
+textures. The texture is the whole map, but the shader is told it ends at
+`VoxelView::world_volume_top`, the map's `solid_top()` (one above its highest
+solid layer), refreshed whenever `update_volume()` uploads anything. Nothing
+above that can block a ray, so a ray leaving the shorter box is exactly as lit,
+and does not walk the empty sky of a tall map up to the ceiling.
 
 **VoxelBrickAtlas** (`src/voxel/VoxelBrickAtlas.cpp/hpp`) - One VoxelVolume cut
 into chunk-sized bricks, a slot per grid, so that every grid that is not the map
@@ -379,7 +384,7 @@ grids there are, then every grid's readable header, then every grid's binary
 body in the same order.
 
 ```
-BGVOX 3                      <- magic and format version, always line one
+BGVOX 4                      <- magic and format version, always line one
 grid_count: 2
 voxel_bytes: 1
 chunk_size: 16
@@ -424,8 +429,9 @@ palette_size: 0                 its body
   are applied once the whole tree is parented, with snapping off, so a grid
   comes back where it was saved rather than being pulled onto its anchor again.
   A grid without them is merely hanging off its parent, which is what every file
-  written before this carries - the version is still 3, as an older build keeps
-  unknown keys and simply ignores these.
+  written before this carries - these came in at version 3, as an older build
+  keeps unknown keys and simply ignores them. Version 4 changed the VoxelMap
+  body (its height and a z per chunk), so version 3 files no longer load.
 - **Bodies are found by id, not by position.** They are indexed in one pass
   first (each names its id and its length), so bodies out of header order, or a
   loader that reads the wrong number of bytes, are logged and worked around
@@ -438,8 +444,8 @@ palette_size: 0                 its body
 - Each grid dispatches on its `type` to the loader registered for it
   (`VoxelMap::load_body`, `SingleChunkGrid::load_body`). New grid types call
   `voxel_file::register_grid_loader()`.
-- The body layout is per grid - VoxelMap writes its size and then one block per
-  chunk, SingleChunkGrid writes a single block - but the voxels inside always
+- The body layout is per grid - VoxelMap writes its size (x, y and height)
+  and then one block per chunk, each with its chunk x, y and z, SingleChunkGrid writes a single block - but the voxels inside always
   go through `voxel_file::write_chunk`/`read_chunk`, so voxels have the same
   format in every grid. That block is raw or run length encoded, whichever is
   smaller, and carries its own byte count so an unwanted chunk can be skipped.
@@ -524,7 +530,7 @@ knows it exists. `main.cpp` is the one place the two meet (the map's size, the
 VoxelView's camera and the map's world matrix are handed in).
 
 The **level is the simulation's**: `sim::World::water_level`, an `int32_t`
-voxel layer (`DEFAULT_WATER_LEVEL` 1, never below `MIN_WATER_LEVEL` 0), changed
+voxel layer (`DEFAULT_WATER_LEVEL` 4, one unit over the lowest ground, never below `MIN_WATER_LEVEL` 0), changed
 only by the `SetWaterLevel` command, in `write_state()` and so in the checksum,
 and saved in `CORE`. Nothing in the simulation reads it yet.
 
@@ -597,7 +603,7 @@ Hand-rolled retained-mode UI in `src/ui`:
   for the world's settings, hidden until F4 or its "Game Settings" button,
   which sits one shader panel's width to the right of "Shader Menu" so both
   panels can be open at once. It has no rows of its own; `main.cpp` adds them.
-  The first is the water level (0 to `CHUNK_SIZE - 1`), which reads
+  The first is the water level (0 to the map's height - 1), which reads
   `simulation->water_level()` and submits `SetWaterLevel`.
 
 The sun's keybind (U) is mirrored by a button in the bottom left, and its angle
