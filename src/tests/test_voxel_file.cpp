@@ -316,9 +316,8 @@ TEST_CASE("a voxel map survives a save and a load", "[voxelfile][file]") {
     const std::string path = dir.file("world.bgvox");
 
     {
-        // Two chunks across, one deep, left as air so nothing depends on the
-        // noise generator staying the same
-        VoxelMap map(nullptr, 32, 16, false);
+        // Two chunks across, one deep, air but for the three voxels set here
+        VoxelMap map(nullptr, 32, 16);
         REQUIRE(map.set_voxel(Int3{0, 0, 0}, 1));
         REQUIRE(map.set_voxel(Int3{20, 3, 5}, 2));
         REQUIRE(map.set_voxel(Int3{31, 15, 15}, 3));

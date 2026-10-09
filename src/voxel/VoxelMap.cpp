@@ -4,7 +4,6 @@
 
 #include "voxel/VoxelMap.hpp"
 
-#include "PerlinNoise.hpp"
 #include <raylib-cpp.hpp>
 #include <istream>
 #include <ostream>
@@ -13,8 +12,7 @@
 #include "voxel/VoxelVolume.hpp"
 #include "game/main.hpp"
 
-VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y,
-                   const bool generate_terrain)
+VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y)
     : VoxelGrid(view)
 {
     this->size = Int2(size_x, size_y);
@@ -29,12 +27,15 @@ VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y
     auto colorMap = this->voxel_colours.get();
     colorMap->insert(std::pair<VoxelID, Color>(0, RED)); // air, should not be seen
     colorMap->insert(std::pair<VoxelID, Color>(1, BEIGE));
+    // Grass, see GRASS_VOXEL in entity/TerrainVoxels.hpp
     colorMap->insert(std::pair<VoxelID, Color>(2, DARKGREEN));
     colorMap->insert(std::pair<VoxelID, Color>(3, YELLOW));
-    // Not used by the terrain, these are here to fill out the editor palette
+    // Not used by the terrain, except where marked, these are here to fill
+    // out the editor palette
     colorMap->insert(std::pair<VoxelID, Color>(4, BLUE));
     colorMap->insert(std::pair<VoxelID, Color>(5, ORANGE));
     colorMap->insert(std::pair<VoxelID, Color>(6, PURPLE));
+    // Dirt, DIRT_VOXEL
     colorMap->insert(std::pair<VoxelID, Color>(7, BROWN));
     colorMap->insert(std::pair<VoxelID, Color>(8, DARKGRAY));
     colorMap->insert(std::pair<VoxelID, Color>(9, SKYBLUE));
@@ -43,6 +44,8 @@ VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y
     // The voxel a grid made by the editor's "New Grid" button starts with, see
     // NEW_GRID_VOXEL_ID
     colorMap->insert(std::pair<VoxelID, Color>(12, BLACK));
+    // Stone, STONE_VOXEL
+    colorMap->insert(std::pair<VoxelID, Color>(13, GRAY));
 
     this->chunks = std::map<Int2, VoxelChunk>();
     for (int ix = 0; ix < chunk_count.x; ++ix) {
@@ -50,31 +53,6 @@ VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y
             chunks[Int2(ix, iy)] = VoxelChunk{};
             chunk_was_updated[Int2(ix, iy)] = true;
             chunk_volume_dirty[Int2(ix, iy)] = true;
-        }
-    }
-
-    // A map that is about to be read out of a file keeps its chunks as air
-    if (!generate_terrain) return;
-
-    const siv::PerlinNoise::seed_type seed = 123456u;
-    const siv::PerlinNoise perlin{ seed };
-
-    for (int i = 0; i < size_x * size_y; i++) {
-        auto ix = i % size_x, iy = i / size_x;
-
-        // Perlin Noise Generation
-        float noise = perlin.noise2D(ix * 0.05, iy * 0.05) * CHUNK_SIZE;
-        int height = std::clamp(static_cast<int>(noise), 0, CHUNK_SIZE - 1);
-
-        // Lift the edges to see the clear limit of the chunks
-        // auto cx = ix % 16, cy = iy % 16;
-        // bool is_edge = cx == 0 || cy == 0;// || cx == CHUNK_SIZE -2 || cy == CHUNK_SIZE - 2;
-        // int height = is_edge ? 3 : 1;
-
-        for (int j = 0; j <= height; j++) {
-            VoxelID voxel_type = j < 3 ? 1 : 2;
-            auto v = VoxelMap::get_voxel(Int3(ix, iy, j));
-            *v = voxel_type;
         }
     }
 }
@@ -130,7 +108,7 @@ VoxelGrid* VoxelMap::load_body(std::istream& in, const voxel_file::LoadContext& 
 
     // The chunks are read into a map that already holds air, so a file that
     // leaves some of them out still gives a complete grid
-    auto* map = new VoxelMap(ctx.view, static_cast<uint32_t>(size_x), static_cast<uint32_t>(size_y), false);
+    auto* map = new VoxelMap(ctx.view, static_cast<uint32_t>(size_x), static_cast<uint32_t>(size_y));
     if (ctx.palette) map->voxel_colours = ctx.palette;
 
     for (uint32_t i = 0; i < chunk_count; ++i) {

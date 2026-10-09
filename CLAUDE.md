@@ -81,6 +81,10 @@ needs nothing from the game side:
   the log written to bytes and replayed, all agreeing on the checksum every
   tick; and the checksum noticing a different seed, a different speed, and
   different slot bookkeeping.
+- `test_sim_terrain.cpp` - the fixed point Perlin noise, the block grid and its
+  height queries, generated columns (stone, dirt, grass on top), the terrain
+  round tripping and damaged bytes refused, and the terrain in the checksum and
+  the `TERR` save section.
 
 A CTest entry, `sim_uses_no_floating_point` (`cmake/CheckSimNoFloats.cmake`),
 fails if the word `float` or `double` appears anywhere under `src/sim`, comments
@@ -107,6 +111,10 @@ The game side:
 - `test_water.cpp` - how the water is cut into chunks, where its surface sits,
   and which chunks a camera over one corner keeps. The `WaterView` itself needs
   a GL context and is never built.
+- `test_terrain_voxels.cpp` - `entity/TerrainVoxels`: each block type's voxels,
+  a terrain drawn into a `VoxelMap`, and `sim::PerlinNoise` checked against
+  `siv::PerlinNoise` (same permutation, values within 1e-3), which only this
+  side may include.
 - `TestHelpers.hpp` - a palette, a self-deleting temp directory, and the
   `REQUIRE_VEC3_EQ` / `REQUIRE_QUAT_EQ` / `REQUIRE_TRANSFORM_EQ` comparisons.
   Include it **first** in a test file: `raymath.h` redefines raylib's vector
@@ -134,7 +142,8 @@ Rules the simulation keeps, and that anything added to it must keep:
 - **No raylib, enforced.** `business_game_sim` has no raylib on its include
   path, so including a `voxel/` or `ui/` header from `src/sim` fails to compile.
 - **No hardware fractional maths.** Everything fractional is `sim::Fixed`
-  (48.16 in an `int64_t`, one unit per terrain voxel). A native and a web build
+  (48.16 in an `int64_t`, `sim::BLOCK_SIZE` (4) units to a terrain block, so
+  one unit per voxel on screen). A native and a web build
   have to agree bit for bit. CTest checks for the keywords.
 - **Fixed ticks.** `sim::TICKS_PER_SECOND` is 20. The simulation counts ticks,
   never seconds or frames, and knows nothing about the camera.
@@ -168,7 +177,8 @@ the simulation after a load.
 
 - A 12 byte header (`BGSV`, `SAVE_FORMAT_VERSION`, section count), then one
   section per system: `u32 tag, u32 version, u32 payload_bytes, payload`. The
-  sections are `CORE` (tick, Rng and water level, version 2), `ROUT`, `VEHI` and `CMDS` (the
+  sections are `CORE` (tick, Rng and water level, version 2), `TERR` (the
+  blocks, raw), `ROUT`, `VEHI` and `CMDS` (the
   `CommandQueue`: waiting commands and the next sequence number, so they run on
   the first tick after the load).
 - **No migration.** A section of another version, an unknown section, a
@@ -188,15 +198,45 @@ the simulation after a load.
 - In the game, F5 saves to `saves/quicksave.bgsave` (git ignored) and F9 loads
   it, both handled at the start of `mainLoop()`, between ticks. A load is
   assigned into the existing `global::simulation` and `global::commands`, as
-  the vehicle panel points at both, after `EntityManager::clear()`. A failed
+  the vehicle panel points at both, after `EntityManager::clear()`, and the
+  map's voxels are redrawn from the loaded terrain. A failed
   load leaves the game as it was. The readout shows how either went. A save
   menu is a `TODO (ui)` next to `QUICKSAVE_PATH`.
+
+**Terrain** (`sim/Terrain.cpp/hpp`, `sim/Noise.cpp/hpp`) is the simulation's:
+a 3D grid of blocks (`sim::BlockType`: air, stone, dirt, grass), x and y across,
+z up, each `BLOCK_SIZE` units on a side. It is the gameplay grid.
+
+- `generate_terrain(TerrainSettings)` takes one noise sample per column, at its
+  middle, and scales it so a sample of 1 reaches the top of the world. The top
+  block is grass, `dirt_depth` blocks of dirt under it, stone below that, and
+  every column keeps at least its bottom block. The defaults are 32x32x4 blocks
+  from seed 123456, the old voxel terrain's map and seed.
+- `sim::PerlinNoise` is a port of `siv::PerlinNoise` (`includes/`) to `Fixed`:
+  the same permutation from the same seed (it shuffles with `std::mt19937` and
+  a plain modulo, both exactly specified) and the same maths, so it agrees with
+  the original to within rounding. `noise2d()` samples siv's plane at
+  z = 0.34567, as siv's `noise2D()` does.
+- `Simulation(seed, TerrainSettings)` generates it, `World::terrain` holds it,
+  `Simulation::terrain()` reads it, and it is in `write_state()` and so in the
+  checksum. Nothing changes it after generation yet: there is no command for it.
+- `column_height()` (blocks) and `ground_level()` (units, for a point) are
+  what anything that sits on the ground asks.
 
 Routes and vehicles are placeholders for testing the split: a route is a closed
 loop of segments that each run along x or y (so lengths are exact without a
 square root), and a vehicle drives round one at a fixed speed per tick.
 
 **Presentation of the simulation** (`src/entity`):
+
+- `TerrainVoxels` draws the terrain into the `VoxelMap`, each block as a cube
+  of `BLOCK_VOXELS` (= `sim::BLOCK_SIZE`, 4) voxels a side: stone grey, dirt
+  brown, grass brown with its top voxel layer green (`block_voxel()`). This is
+  where a block will get more detail than the simulation gives it. The
+  VoxelView is built at `terrain_voxel_size()`, and `build_terrain_voxels()`
+  empties the map, writes every block and marks every chunk dirty. The map is
+  one chunk (16 voxels) tall, so a terrain taller than 4 blocks is cut off, and
+  reported.
 
 - `Entity` is a simulation object made visible: a grid tree it owns, plus
   cosmetic `Script`s. `on_tick()` copies what the simulation says after every
@@ -240,7 +280,7 @@ The UI/scene uses a `ViewNode` tree hierarchy with recursive update/render trave
 ### Voxel System
 
 **VoxelGrid** (abstract base in `src/voxel/VoxelGrid.hpp`) has two implementations:
-- **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks), Perlin noise terrain generation
+- **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks), one chunk tall. It starts as air: the terrain is the simulation's, drawn in by `entity/TerrainVoxels`
 - **SingleChunkGrid** (`src/voxel/SingleChunkGrid.cpp/hpp`) - Single chunk for the voxel editor
 
 **VoxelMesher** (`src/voxel/VoxelMesher.cpp/hpp`) converts voxel data to 3D
@@ -638,7 +678,8 @@ Each frame, `mainLoop()` runs whole ticks out of `global::tick_accumulator`
 `EntityManager::on_tick()` after each step, then `EntityManager::present()`
 with the leftover fraction of a tick, then the scripts, then the view tree.
 `global::game_speed` scales game time (0 pauses). `init()` queues a test
-scenario (`queue_test_scenario()`): two loops of road following the terrain and
+scenario (`queue_test_scenario()`): two loops of road following the
+simulation's terrain (`Terrain::ground_level()`) and
 a dozen cars, two of them driving backwards. A readout under the title shows the
 tick, the ticks run that frame, and vehicles in the simulation against vehicles
 drawn.
@@ -681,7 +722,8 @@ take the narrow header instead of dragging in the window and the view tree.
 - **raylib** - Graphics/rendering
 - **raylib-cpp** - C++ wrapper for raylib
 - **raygui** - UI components
-- **PerlinNoise.hpp** - Terrain generation (in `includes/`)
+- **PerlinNoise.hpp** - The reference `sim::PerlinNoise` was ported from, used
+  only by `test_terrain_voxels.cpp` now (in `includes/`)
 
 ## Known Issues (from TODOs in code)
 

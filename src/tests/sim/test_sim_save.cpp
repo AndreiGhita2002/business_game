@@ -242,7 +242,9 @@ TEST_CASE("Save: a section duplicated is refused", "[sim][save]") {
     const std::vector<uint8_t> section(bytes.begin() + FIRST_SECTION,
                                        bytes.begin() + FIRST_SECTION + 12 + length);
     bytes.insert(bytes.end(), section.begin(), section.end());
-    poke_u32(bytes, 8, 5);
+    uint32_t count = 0;
+    for (int i = 0; i < 4; ++i) count |= static_cast<uint32_t>(bytes[8 + i]) << (8 * i);
+    poke_u32(bytes, 8, count + 1);
 
     std::string error;
     REQUIRE_FALSE(read_save(bytes, &error).has_value());

@@ -13,6 +13,7 @@
 #include "sim/Event.hpp"
 #include "sim/Rng.hpp"
 #include "sim/Routes.hpp"
+#include "sim/Terrain.hpp"
 #include "sim/Vehicles.hpp"
 
 namespace sim {
@@ -42,6 +43,8 @@ class World {
 public:
     uint64_t tick = 0;
     Rng rng;
+    // The ground, in blocks. Nothing changes it after it is generated yet.
+    Terrain terrain;
     Routes routes;
     Vehicles vehicles;
     // The highest voxel layer the sea fills. Nothing in the simulation reads
@@ -73,7 +76,8 @@ private:
  */
 class Simulation {
 public:
-    explicit Simulation(uint64_t seed);
+    /** A new game: the Rng seeded, and the terrain generated from `terrain`. */
+    explicit Simulation(uint64_t seed, const TerrainSettings& terrain = TerrainSettings{});
 
     /**
      * Runs tick tick(): applies `commands` sorted by (player, sequence), then
@@ -88,6 +92,7 @@ public:
     /** What the last step() emitted, in the order it happened. */
     std::span<const Event> events() const { return world.events; }
 
+    const Terrain& terrain() const { return world.terrain; }
     const Routes& routes() const { return world.routes; }
     const Vehicles& vehicles() const { return world.vehicles; }
     int32_t water_level() const { return world.water_level; }

@@ -27,10 +27,11 @@ public:
     std::map<Int2, ModelInfo> chunk_models;
 
     /**
-     * @param generate_terrain: when false the chunks are left as air, for a map
-     *        that is about to be filled in from a file.
+     * A map of air. The terrain is the simulation's now: the game draws it in
+     * with build_terrain_voxels() (entity/TerrainVoxels.hpp), and a map read
+     * from a file is filled in by load_body().
      */
-    VoxelMap(VoxelView* view, uint32_t size_x, uint32_t size_y, bool generate_terrain = true);
+    VoxelMap(VoxelView* view, uint32_t size_x, uint32_t size_y);
     ~VoxelMap() override;
 
     std::string& get_grid_type() override;

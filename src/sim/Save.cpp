@@ -60,13 +60,16 @@ std::vector<uint8_t> write_save(const Simulation& simulation, const CommandQueue
     ByteWriter out;
     out.write_u32(SAVE_MAGIC);
     out.write_u32(SAVE_FORMAT_VERSION);
-    out.write_u32(4);
+    out.write_u32(5);
 
     // In the same order as Simulation::write_state(), with the same writers
     write_section(out, SECTION_CORE, SECTION_CORE_VERSION, [&world](ByteWriter& w) {
         w.write_u64(world.tick);
         world.rng.write(w);
         w.write_i32(world.water_level);
+    });
+    write_section(out, SECTION_TERRAIN, SECTION_TERRAIN_VERSION, [&world](ByteWriter& w) {
+        world.terrain.write(w);
     });
     write_section(out, SECTION_ROUTES, SECTION_ROUTES_VERSION, [&world](ByteWriter& w) {
         world.routes.write(w);
@@ -81,8 +84,9 @@ std::vector<uint8_t> write_save(const Simulation& simulation, const CommandQueue
 }
 
 std::optional<LoadedGame> read_save(const std::span<const uint8_t> bytes, std::string* error) {
-    // The seed does not matter: the Rng's whole state comes out of the save
-    LoadedGame game{Simulation(0), CommandQueue{}};
+    // The seed does not matter: the Rng's whole state comes out of the save.
+    // Nor does the terrain, which is read in whole, so none is generated.
+    LoadedGame game{Simulation(0, TerrainSettings{.size_x = 0}), CommandQueue{}};
     World& world = SaveAccess::world(game.simulation);
 
     const std::map<uint32_t, SectionReader> readers = {
@@ -90,6 +94,9 @@ std::optional<LoadedGame> read_save(const std::span<const uint8_t> bytes, std::s
             // A level no command could have set is refused, not trusted
             return in.read_u64(&world.tick) && world.rng.read(in)
                 && in.read_i32(&world.water_level) && world.water_level >= MIN_WATER_LEVEL;
+        }}},
+        {SECTION_TERRAIN, {SECTION_TERRAIN_VERSION, [&world](ByteReader& in) {
+            return world.terrain.read(in);
         }}},
         {SECTION_ROUTES, {SECTION_ROUTES_VERSION, [&world](ByteReader& in) {
             return world.routes.read(in);

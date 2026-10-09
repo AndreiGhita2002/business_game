@@ -125,8 +125,8 @@ public:
 
 /**
  * Moves the sea to another level, see World::water_level. Refused below
- * MIN_WATER_LEVEL. The simulation has no terrain to know the top of the world
- * by, so a level above everything is allowed and simply floods it all.
+ * MIN_WATER_LEVEL. A level above the top of the terrain is allowed and
+ * simply floods it all.
  */
 class SetWaterLevel final : public Command {
 public:

@@ -18,8 +18,10 @@ namespace sim {
  * compilers and platforms. Integers are, so every fractional quantity in the
  * simulation is one of these.
  *
- * One unit is one terrain voxel. That makes the presentation's conversion a
- * cast and an axis swap, see entity/SimConvert.hpp.
+ * A terrain block is BLOCK_SIZE (4) units across (sim/Terrain.hpp), and the
+ * presentation draws a block as that many voxels a side, so one unit is one
+ * voxel on screen. That makes the presentation's conversion a cast and an
+ * axis swap, see entity/SimConvert.hpp.
  *
  * Addition, subtraction and comparison are exact. Multiplying two of them goes
  * through a 128 bit intermediate where the compiler has one (clang and gcc,

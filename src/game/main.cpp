@@ -13,6 +13,7 @@
 #include <regex>
 
 #include "raylib-cpp.hpp"
+#include "entity/TerrainVoxels.hpp"
 #include "voxel/VoxelMesher.hpp"
 #include "voxel/SingleChunkGrid.hpp"
 #include "ui/UIView.hpp"
@@ -68,11 +69,10 @@ static void handle_save_keys();
  * setup runs at tick 0 and the cars spawn at tick 1, once the routes exist.
  *
  * The routes follow the terrain: every point takes its height from the top of
- * the map's column there. That reads the voxels, which the simulation must
- * never do, but this is not the simulation - it is input, worked out before
- * the command is made, and the command only carries plain numbers.
+ * the simulation's terrain there. Worked out before the command is made, so
+ * the command only carries plain numbers.
  */
-static void queue_test_scenario(VoxelMap* map);
+static void queue_test_scenario(const sim::Terrain& terrain);
 
 void global::init() {
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
@@ -93,9 +93,12 @@ void global::init() {
     int ambientLoc = GetShaderLocation(voxel_shader, "ambient");
     SetShaderValue(voxel_shader, ambientLoc, ambient, SHADER_UNIFORM_VEC4);
 
-    // Voxels
-    root_view->add_child(std::make_unique<VoxelView>(root_view.get(), &voxel_shader));
+    // Voxels. The map is sized to hold the simulation's terrain and then has
+    // it drawn in, a block as a cube of voxels.
+    root_view->add_child(std::make_unique<VoxelView>(root_view.get(), &voxel_shader,
+                                                     terrain_voxel_size(simulation->terrain())));
     voxel_view = static_cast<VoxelView *>(root_view->child.get());
+    build_terrain_voxels(*voxel_view->game_map, simulation->terrain());
 
     // Water over the whole map. A sibling of the VoxelView, after it, as it
     // needs the voxels' depth in the buffer to be hidden behind the terrain,
@@ -121,7 +124,7 @@ void global::init() {
     assets->register_builder("car.blue", placeholder_car_builder(4), PLACEHOLDER_CAR_PIVOT);
     assets->register_builder("car.orange", placeholder_car_builder(5), PLACEHOLDER_CAR_PIVOT);
     entities = std::make_unique<EntityManager>(voxel_view, assets.get(), voxel_view);
-    queue_test_scenario(voxel_view->game_map);
+    queue_test_scenario(simulation->terrain());
 
     // UI
     // Added after the VoxelView, so it ends up as its sibling and is rendered
@@ -364,19 +367,15 @@ void global::mainLoop() {
     EndDrawing();
 }
 
-static void queue_test_scenario(VoxelMap* map) {
+static void queue_test_scenario(const sim::Terrain& terrain) {
     // Outside the namespace, but it is setting up global state throughout
     using namespace global;
     using sim::Fixed;
     using sim::Point;
 
-    // One above the highest solid voxel in the column, so the cars stand on
-    // the ground rather than in it
-    const auto ground = [map](const int x, const int y) {
-        for (int z = CHUNK_SIZE - 1; z >= 0; --z) {
-            if (map->is_solid(Int3{x, y, z})) return z + 1;
-        }
-        return 0;
+    // The top of the ground, so the cars stand on it rather than in it
+    const auto ground = [&terrain](const int x, const int y) {
+        return terrain.ground_level(Fixed::from_int(x), Fixed::from_int(y));
     };
 
     // A rectangle through (x0, y0) and (x1, y1), with a point every `step`
@@ -386,7 +385,7 @@ static void queue_test_scenario(VoxelMap* map) {
     const auto loop = [&ground](const int x0, const int y0, const int x1, const int y1, const int step) {
         std::vector<Point> points;
         const auto add = [&](const int x, const int y) {
-            points.push_back(Point{Fixed::from_int(x), Fixed::from_int(y), Fixed::from_int(ground(x, y))});
+            points.push_back(Point{Fixed::from_int(x), Fixed::from_int(y), ground(x, y)});
         };
         for (int x = x0; x < x1; x += step) add(x, y0);
         for (int y = y0; y < y1; y += step) add(x1, y);
@@ -470,6 +469,11 @@ static void handle_save_keys() {
         *simulation = std::move(loaded->simulation);
         commands = std::move(loaded->commands);
         tick_accumulator = 0.0f;
+
+        // The terrain is the simulation's too, so the map is drawn again from
+        // the loaded one. The map keeps its size: a saved terrain of another
+        // size is drawn as far as it fits.
+        build_terrain_voxels(*voxel_view->game_map, simulation->terrain());
 
         TraceLog(LOG_INFO, "LOAD: loaded tick %llu from %s",
                  static_cast<unsigned long long>(simulation->tick()), QUICKSAVE_PATH);

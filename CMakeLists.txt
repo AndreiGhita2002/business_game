@@ -67,6 +67,8 @@ add_library(business_game_sim STATIC
         src/sim/Event.hpp
         src/sim/Fixed.hpp
         src/sim/Handle.hpp
+        src/sim/Noise.cpp
+        src/sim/Noise.hpp
         src/sim/Pool.hpp
         src/sim/Rng.hpp
         src/sim/Routes.cpp
@@ -76,6 +78,8 @@ add_library(business_game_sim STATIC
         src/sim/Serial.hpp
         src/sim/Simulation.cpp
         src/sim/Simulation.hpp
+        src/sim/Terrain.cpp
+        src/sim/Terrain.hpp
         src/sim/Vehicles.cpp
         src/sim/Vehicles.hpp
 )
@@ -148,6 +152,8 @@ add_library(business_game_lib STATIC
         src/entity/GridSink.hpp
         src/entity/SimConvert.cpp
         src/entity/SimConvert.hpp
+        src/entity/TerrainVoxels.cpp
+        src/entity/TerrainVoxels.hpp
         src/entity/VehicleEntity.cpp
         src/entity/VehicleEntity.hpp
         src/ui/VehiclePanel.cpp
@@ -224,6 +230,7 @@ if(BUSINESS_GAME_BUILD_TESTS)
             src/tests/sim/test_sim_routes.cpp
             src/tests/sim/test_sim_save.cpp
             src/tests/sim/test_sim_simulation.cpp
+            src/tests/sim/test_sim_terrain.cpp
     )
     target_link_libraries(business_game_sim_tests PRIVATE
             business_game_sim
@@ -239,6 +246,7 @@ if(BUSINESS_GAME_BUILD_TESTS)
             src/tests/test_entity_manager.cpp
             src/tests/test_frustum.cpp
             src/tests/test_sim_convert.cpp
+            src/tests/test_terrain_voxels.cpp
             src/tests/test_transform.cpp
             src/tests/test_voxel_file.cpp
             src/tests/test_voxel_mesh.cpp

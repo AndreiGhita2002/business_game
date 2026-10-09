@@ -225,7 +225,7 @@ void VoxelView::release_grid_volume(const int slot) {
     grid_atlas.release_slot(slot);
 }
 
-VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader)
+VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader, const Int2 map_size)
     : ViewNode(parent), voxel_shader(shader)
 {
     // Camera
@@ -267,7 +267,7 @@ VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader)
     // Voxels
     voxel_grids = std::vector<VoxelGrid*>();
 
-    game_map = new VoxelMap(this, 128, 128);
+    game_map = new VoxelMap(this, static_cast<uint32_t>(map_size.x), static_cast<uint32_t>(map_size.y));
     voxel_grids.emplace_back(game_map);
 
     // The voxels the shadow rays are traced against. Sized to whole chunks

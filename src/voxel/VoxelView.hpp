@@ -68,7 +68,11 @@ public:
     void update(float delta_time) override;
     void render() override;
 
-    VoxelView(ViewNode* parent, raylib::Shader* shader);
+    /**
+     * @param map_size: the map's size in voxels. It starts as air; the game
+     *        draws the simulation's terrain into it, see entity/TerrainVoxels.hpp.
+     */
+    VoxelView(ViewNode* parent, raylib::Shader* shader, Int2 map_size);
 
     /**
      * Deletes the grids still in voxel_grids, which by then should only be the

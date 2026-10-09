@@ -17,7 +17,7 @@ namespace sim {
 
 /**
  * A point in the simulation's world. The axes are the grids' axes: x and y on
- * the ground, z up, one unit per terrain voxel.
+ * the ground, z up, BLOCK_SIZE units to a terrain block.
  */
 struct Point {
     Fixed x;

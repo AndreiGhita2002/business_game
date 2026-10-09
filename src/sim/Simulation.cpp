@@ -8,8 +8,9 @@
 
 namespace sim {
 
-Simulation::Simulation(const uint64_t seed) {
+Simulation::Simulation(const uint64_t seed, const TerrainSettings& terrain) {
     world.rng = Rng(seed);
+    world.terrain = generate_terrain(terrain);
 }
 
 void Simulation::step(const std::span<const StampedCommand> commands) {
@@ -53,6 +54,7 @@ void Simulation::write_state(ByteWriter& out) const {
     out.write_u64(world.tick);
     world.rng.write(out);
     out.write_i32(world.water_level);
+    world.terrain.write(out);
     world.routes.write(out);
     world.vehicles.write(out);
 }
