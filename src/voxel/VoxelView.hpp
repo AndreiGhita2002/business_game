@@ -71,6 +71,10 @@ public:
     VoxelBrickAtlas grid_atlas;
 
     raylib::Camera camera;
+    // Scales how fast the movement keys (WASD, F/C) carry the camera, from 24
+    // units a second at 1. Turning (Q/E) keeps its own speed. Edited in the
+    // game settings menu.
+    float camera_speed_multiplier = 1.0f;
     raylib::Shader* voxel_shader;
 
     unsigned int next_light_id = 0;

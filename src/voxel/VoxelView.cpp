@@ -108,7 +108,7 @@ void VoxelView::drawLightMarkers() const {
 }
 
 void VoxelView::updateCamera() {
-    const float camera_trans_speed = 24.0f * GetFrameTime();
+    const float camera_trans_speed = 24.0f * camera_speed_multiplier * GetFrameTime();
     const float camera_pan_speed  = 6.0f * GetFrameTime();
 
     // --- Build camera-relative basis on the XZ plane ---

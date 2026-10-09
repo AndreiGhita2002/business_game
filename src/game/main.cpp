@@ -239,6 +239,13 @@ void global::init() {
         [](const int cells) { world_cells_y = cells; },
         1, 1, sim::MAX_WORLD_CELLS);
 
+    // The camera speed multiplier: how fast the movement keys carry the camera,
+    // 1 being the old 24 units a second. Labelled short to fit the row. The
+    // pointer is safe, unlike the entities above: the VoxelView
+    // is in the same view tree as the panel and goes with it.
+    settings_menu->add_value_row("camera speed", &voxel_view->camera_speed_multiplier,
+        0.25f, 0.25f, 20.0f, 2, {});
+
     ui_view->add_child(std::move(settings_menu_node));
 
     ui_view->add_child(std::make_unique<UIButton>(ui_view, "Game Settings",

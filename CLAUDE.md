@@ -710,8 +710,10 @@ Hand-rolled retained-mode UI in `src/ui`:
   vehicle distance (16 to 1024), the `EntityManager`'s realise radius, with the
   unrealise radius kept `UNREALIZE_MARGIN` beyond it. It is a getter/setter
   row rather than a pointer, as the entities are freed before the panel. The
-  last two are "world cells x/y" (1 to `sim::MAX_WORLD_CELLS`), the size of
-  the next world "New Island" makes; they change nothing until then.
+  next two are "world cells x/y" (1 to `sim::MAX_WORLD_CELLS`), the size of
+  the next world "New Island" makes; they change nothing until then. The last
+  is "camera speed" (0.25 to 20), `VoxelView::camera_speed_multiplier`, which
+  scales the movement keys' 24 units a second; turning keeps its own speed.
 
 The sun's keybind (U) is mirrored by a button in the bottom left, and its angle
 in the sky by the shader menu rows; both write the same light. The camera
@@ -865,8 +867,8 @@ take the narrow header instead of dragging in the window and the view tree.
 - The sea floor plane is unlit, so it does not match lit stone exactly where
   an ocean cell meets an island's own sea floor; and it is not a grid, so the
   editor cannot pick it.
-- The camera keeps its old speed (24 units a second), which crosses a 2560
-  voxel world in under two minutes.
+- The camera starts at its old speed (24 units a second, "camera speed" 1 in
+  the game settings), which crosses a 2560 voxel world in under two minutes.
 - `TestHelpers`' `TempDir` names its directories from a counter per process,
   so two test processes run in parallel (`ctest -j`) can collide on
   `business_game_tests_0`. Serial runs are fine.
