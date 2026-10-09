@@ -924,6 +924,14 @@ take the narrow header instead of dragging in the window and the view tree.
 
 ## Known Issues (from TODOs in code)
 
+- **Vehicle performance, for after the next vehicle pass** (Andrei's call,
+  from the performance review): `TODO(claude)` comments in
+  `EntityManager.cpp` (the per-frame scan, batching removals, capping
+  realisations per frame, a shared prototype per asset, caching
+  `largest_extent`) and `VoxelView.cpp` (`remove_grids()` cost, shadow casters
+  per draw and the atlas's 256 slots). Nothing to do while the game has no
+  vehicles.
+
 - VoxelGrid model vector recreated on every call (VoxelGrid.hpp:71)
 - A placeholder car is five grids, so it takes five shadow atlas slots (256 in
   all) and five of a draw call's `MAX_GRID_VOLUMES` (8) casters. Two cars side

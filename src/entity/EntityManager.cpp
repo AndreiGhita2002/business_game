@@ -40,6 +40,11 @@ void EntityManager::present(const sim::Simulation& sim, const Vector3 camera,
     std::vector<std::pair<sim::VehicleId, const sim::Vehicle*>> to_realize;
     std::vector<sim::VehicleId> to_unrealize;
 
+    // TODO(claude): after the next vehicle pass (Andrei, performance review).
+    //  This scan runs every frame over every vehicle in the simulation, near or
+    //  not. Poses only change on a tick, so it only needs running on a frame
+    //  that ran a tick or moved the camera a few units; beyond that, spatial
+    //  buckets so only the vehicles near the camera are looked at.
     sim.vehicles().for_each([&](const sim::VehicleId id, const sim::Vehicle& vehicle) {
         const std::optional<sim::RoutePose> pose = sim.vehicle_pose(id);
         if (!pose) return;
@@ -58,6 +63,12 @@ void EntityManager::present(const sim::Simulation& sim, const Vector3 camera,
         if (!sim.vehicles().contains(entity->vehicle_id())) to_unrealize.push_back(entity->vehicle_id());
     }
 
+    // TODO(claude): after the next vehicle pass. Each unrealize() hands its
+    //  grids back through its own VoxelView::remove_grids() call, which is
+    //  O(all grids) each time: gather every leaving vehicle's grids and remove
+    //  them in one call. And cap how many are realised in one frame, nearest
+    //  the camera first, so panning across a busy area does not build dozens
+    //  of vehicles (and mesh five grids each) in a single frame.
     for (const sim::VehicleId id : to_unrealize) unrealize(id);
     for (const auto& [id, vehicle] : to_realize) realize(sim, id, *vehicle);
 
@@ -84,6 +95,11 @@ void EntityManager::realize(const sim::Simulation& sim, const sim::VehicleId id,
     if (assets == nullptr) return;
 
     Vector3 pivot{};
+    // TODO(claude): after the next vehicle pass. Every realisation builds the
+    //  asset from scratch (a file asset would be read from disk again), then
+    //  meshes and uploads each of its grids and takes an atlas brick for each.
+    //  One prototype per asset, its meshes and bricks shared by every instance
+    //  and only the transforms per vehicle, would make realising nearly free.
     VoxelGrid* root = assets->instantiate(vehicle.model, view, &pivot);
     if (root == nullptr) {
         if (missing_assets.insert(vehicle.model).second) {
@@ -96,6 +112,8 @@ void EntityManager::realize(const sim::Simulation& sim, const sim::VehicleId id,
     // Scaled to fit before the entity places it, which takes the scale into
     // account when it puts the pivot on the simulation's position
     float scale = 1.0f;
+    // TODO(claude): after the next vehicle pass. The same for every vehicle of
+    //  an asset, and it walks every voxel of every grid: cache it per AssetId.
     const float extent = largest_extent(root);
     if (vehicle_size > 0.0f && extent > 0.0f) scale = vehicle_size / extent;
     Transform root_transform = root->get_transform();

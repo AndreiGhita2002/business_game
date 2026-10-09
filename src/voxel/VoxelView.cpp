@@ -388,6 +388,10 @@ void VoxelView::add_grids(const std::vector<VoxelGrid*>& grids) {
     voxel_grids.insert(voxel_grids.end(), grids.begin(), grids.end());
 }
 
+// TODO(claude): after the next vehicle pass. O(all grids x removed grids), and
+//  called once per vehicle leaving range: with hundreds of vehicles, remove a
+//  frame's worth in one call (see EntityManager::present()), or keep an index
+//  from grid to its place in voxel_grids.
 void VoxelView::remove_grids(const std::vector<VoxelGrid*>& grids) {
     // Before the grids are forgotten, while every pointer is still good
     for (const GridRemovalListener& listener : removal_listeners) listener(grids);
@@ -458,6 +462,14 @@ void VoxelView::drawVoxelModel(const DrawItem& item) {
     // DrawModelWires(model, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, DARKGRAY);
 }
 
+// TODO(claude): after the next vehicle pass. Every draw tests every caster
+//  (sendGridVolumes()), so the cost is draws x casters, and a car is five grids
+//  and so five casters: quadratic in the number of vehicles near the camera.
+//  One brick per vehicle rather than per grid (the wheels baked into the
+//  body's brick, or a brick per entity), and a spatial bucket of casters per
+//  area so a draw only tests the ones near it, would bring it down. The atlas
+//  (VoxelBrickAtlas, 256 slots) fills at about 51 cars as it stands, and a
+//  draw call traces at most MAX_GRID_VOLUMES (8), fewer than two cars.
 void VoxelView::gatherShadowCasters() {
     shadow_casters.clear();
     if (!grid_atlas.is_created() || !lights[sun_light_id].enabled) return;
