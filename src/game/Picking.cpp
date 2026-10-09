@@ -229,10 +229,96 @@ bool volume_march_coarse(const VolumeSolid& solid, const VolumeSolid& coarse_sol
     return volume_march(capped, cells, cell_origin, dir, max_steps, &count);
 }
 
+bool grid_ray_cast(VoxelGrid* grid, const Vector3 origin, const Vector3 dir, const float max_t,
+                   GridRayHit* out) {
+    if (grid == nullptr) return false;
+    const Int3 extent = grid->voxel_extent();
+    const int size[3] = {extent.x, extent.y, extent.z};
+    if (size[0] <= 0 || size[1] <= 0 || size[2] <= 0) return false;
+
+    // A component of exactly zero would divide by zero below; nudged to
+    // something tiny, the boundary on that axis is never reached
+    constexpr float EPS_DIR = 1e-6f;
+    const float o[3] = {origin.x, origin.y, origin.z};
+    float d[3] = {dir.x, dir.y, dir.z};
+    for (float& c : d) {
+        if (std::fabs(c) < EPS_DIR) c = c < 0.0f ? -EPS_DIR : EPS_DIR;
+    }
+
+    // Into the box, near and far, and which face it comes in through: the
+    // axis whose near boundary is crossed last
+    float t_enter = -FLT_MAX;
+    float t_exit = FLT_MAX;
+    int entry_axis = 0;
+    for (int a = 0; a < 3; ++a) {
+        const float t_lo = (0.0f - o[a]) / d[a];
+        const float t_hi = (static_cast<float>(size[a]) - o[a]) / d[a];
+        const float t_near = std::min(t_lo, t_hi);
+        if (t_near > t_enter) { t_enter = t_near; entry_axis = a; }
+        t_exit = std::min(t_exit, std::max(t_lo, t_hi));
+    }
+    float t = std::max(t_enter, 0.0f);
+    if (t_exit < t || t > max_t) return false;
+
+    int step[3];
+    int voxel[3];
+    float t_delta[3];
+    float t_max[3];
+    for (int a = 0; a < 3; ++a) {
+        step[a] = d[a] > 0.0f ? 1 : -1;
+        // Just past the entry, so the first voxel is the one the ray is in
+        voxel[a] = std::clamp(static_cast<int>(std::floor(o[a] + d[a] * (t + 1e-4f))), 0, size[a] - 1);
+        t_delta[a] = std::fabs(1.0f / d[a]);
+        // The ray's own t at the next boundary on this axis, so t stays a
+        // distance along the ray as it was given
+        t_max[a] = (static_cast<float>(voxel[a] + (step[a] > 0 ? 1 : 0)) - o[a]) / d[a];
+    }
+
+    // Started inside the box: no face was crossed, so take the one the ray
+    // points most nearly away from
+    if (t_enter < 0.0f) {
+        entry_axis = 0;
+        for (int a = 1; a < 3; ++a) {
+            if (std::fabs(d[a]) > std::fabs(d[entry_axis])) entry_axis = a;
+        }
+    }
+    int normal[3] = {0, 0, 0};
+    normal[entry_axis] = -step[entry_axis];
+
+    // A ray crosses at most this many voxels on its way through the box
+    const int max_steps = size[0] + size[1] + size[2] + 3;
+    for (int i = 0; i < max_steps; ++i) {
+        if (voxel[0] < 0 || voxel[1] < 0 || voxel[2] < 0 ||
+            voxel[0] >= size[0] || voxel[1] >= size[1] || voxel[2] >= size[2])
+            return false;
+        if (t > max_t) return false;
+
+        if (grid->is_solid(Int3{voxel[0], voxel[1], voxel[2]})) {
+            if (out != nullptr) {
+                *out = GridRayHit{Int3{voxel[0], voxel[1], voxel[2]}, Int3{normal[0], normal[1], normal[2]}, t};
+            }
+            return true;
+        }
+
+        // Across the nearest boundary, which is the face the next voxel is
+        // entered through
+        int a = 0;
+        if (t_max[1] < t_max[a]) a = 1;
+        if (t_max[2] < t_max[a]) a = 2;
+        t = t_max[a];
+        voxel[a] += step[a];
+        t_max[a] += t_delta[a];
+        normal[0] = normal[1] = normal[2] = 0;
+        normal[a] = -step[a];
+    }
+    return false;
+}
+
 bool find_voxel_on_ray(const Ray ray, const std::vector<VoxelGrid*>* voxel_grids,
                        const char* grid_type, VoxelRayHit* out) {
     VoxelRayHit best{};
-    best.collision.distance = FLT_MAX;
+    // In the ray's own units, which every grid's walk shares (below)
+    float best_t = FLT_MAX;
     bool found = false;
 
     for (VoxelGrid* grid : *voxel_grids) {
@@ -240,29 +326,42 @@ bool find_voxel_on_ray(const Ray ray, const std::vector<VoxelGrid*>* voxel_grids
         if (grid_type != nullptr && grid->get_grid_type().compare(grid_type) != 0)
             continue;
 
-        for (ModelInfo* model_info : grid->get_models()) {
-            // SingleChunkGrid reports a null model until it has been meshed
-            if (model_info == nullptr || !model_info->do_render) continue;
+        // The ray carried into the grid's model space, a point and a
+        // direction. The grid's matrix is linear, so a point t along the ray
+        // there is the point t along it in the world, and every grid's t can
+        // be compared with every other's.
+        const Matrix grid_matrix = transform_to_matrix(grid->get_world_transform());
+        const Matrix inverse = MatrixInvert(grid_matrix);
+        const Vector3 origin = Vector3Transform(ray.position, inverse);
+        const Vector3 dir = Vector3Subtract(Vector3Transform(Vector3Add(ray.position, ray.direction), inverse), origin);
 
-            const Matrix world_mat = voxel_model_matrix(grid, *model_info);
+        // Model space is the mesher's (X grid x, Y grid z, Z grid y), the walk
+        // is in grid order
+        GridRayHit hit{};
+        if (!grid_ray_cast(grid, Vector3{origin.x, origin.z, origin.y}, Vector3{dir.x, dir.z, dir.y}, best_t, &hit))
+            continue;
+        if (hit.t >= best_t) continue;
 
-            // Every model is meshed inside its own chunk's cube, so a ray that
-            // misses the cube, or reaches it only past the best hit so far,
-            // cannot hit a triangle in it. raylib's mesh test has no such
-            // early out and walks every triangle, which over a whole island
-            // is most of a frame.
-            const RayCollision box = GetRayCollisionBox(ray, voxel_box_bounds(world_mat, CHUNK_SIZE));
-            if (!box.hit || box.distance >= best.collision.distance) continue;
+        // Only what is drawn can be picked
+        ModelInfo* model = grid->model_for_voxel(hit.voxel);
+        if (model == nullptr || !model->do_render) continue;
 
-            for (int i = 0; i < model_info->model.meshCount; ++i) {
-                RayCollision c = GetRayCollisionMesh(ray, model_info->model.meshes[i], world_mat);
+        // The face's normal in the world: carried out of model space as a
+        // direction, which is what the tools carry back in again
+        const Vector3 normal_model{static_cast<float>(hit.normal.x), static_cast<float>(hit.normal.z),
+                                   static_cast<float>(hit.normal.y)};
+        const Vector3 normal_world = Vector3Normalize(Vector3Subtract(
+            Vector3Transform(normal_model, grid_matrix), Vector3Transform(Vector3Zero(), grid_matrix)));
 
-                if (c.hit && c.distance < best.collision.distance) {
-                    best = VoxelRayHit{grid, model_info, c, world_mat};
-                    found = true;
-                }
-            }
-        }
+        RayCollision collision{};
+        collision.hit = true;
+        collision.distance = hit.t * Vector3Length(ray.direction);
+        collision.point = Vector3Add(ray.position, Vector3Scale(ray.direction, hit.t));
+        collision.normal = normal_world;
+
+        best = VoxelRayHit{grid, model, collision, voxel_model_matrix(grid, *model)};
+        best_t = hit.t;
+        found = true;
     }
 
     if (found && out != nullptr) *out = best;

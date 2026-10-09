@@ -56,6 +56,8 @@ public:
     void update_models() override;
     std::vector<ModelInfo*> get_models() override;
     bool in_bounds(Int3 grid_pos) const override;
+    Int3 voxel_extent() const override { return Int3{size.x, size.y, height}; }
+    ModelInfo* model_for_voxel(Int3 grid_pos) override;
     bool model_to_grid(const ModelInfo* model, Vector3 local_pos, Int3* out) override;
 
     /**

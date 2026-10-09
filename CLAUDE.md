@@ -117,7 +117,9 @@ The game side:
 - `test_voxel_mesh.cpp` - `build_chunk_mesh_data()`: which faces come out, the
   faces dropped against a neighbouring chunk, and the baked ambient occlusion.
 - `test_voxel_ray.cpp` - the shadow walks: `volume_march()` and the two level
-  `volume_march_coarse()` agreeing on thousands of random rays, and
+  `volume_march_coarse()` agreeing on thousands of random rays, picking's
+  `grid_ray_cast()` (the voxel, its face and t, and agreeing with the shadow
+  walk), and
   `voxel_ray_blocked()`, the voxel walk a shadow ray
   does, which is the testable twin of the one in `lighting.fs`, plus the boxes
   that decide which grids a draw call is traced against.
@@ -392,8 +394,9 @@ change therefore means remeshing.
   (`vertex_ao()`), and the quad is split along the darker diagonal so the shade
   does not crease the wrong way. `AO_SHADE` is the brightness of the four
   levels, so changing it means remeshing.
-- After upload only the vertices and indices stay in RAM (picking and the
-  selection boxes read them); normals, UVs and colours are freed.
+- After upload only the indices stay in RAM (`DrawMesh()` draws indexed only
+  when they are there); everything else is freed. `chunk_mesh_bounds()` takes
+  the box round the vertices first, into `ModelInfo::bounds`.
 - `lighting.fs` reads `fragColor.rgb` as the colour (multiplied into the white
   material) and `fragColor.a` as the occlusion; the alpha is a shade, not
   transparency.
@@ -801,9 +804,17 @@ of hit-testing and `mouse_consumed`. Do not convert the framework wholesale.
 
 ### Picking
 
-`find_voxel_on_ray()` tests a model's chunk cube first and skips the model if
-the ray misses it or reaches it only past the best hit so far, as raylib's
-`GetRayCollisionMesh` walks every triangle with no early out of its own.
+**Picking walks voxels, not triangles.** `find_voxel_on_ray()` carries the ray
+into each grid's own space (the grid's matrix is linear, so a point t along it
+there is the point t along it in the world, and every grid's t compares) and
+walks its voxels with `grid_ray_cast()`: from where it enters the box
+`VoxelGrid::voxel_extent()` makes, voxel by voxel, to the first solid one no
+further than the best hit so far, with the face it came in through and its t.
+The hit's model is `VoxelGrid::model_for_voxel()`, the one that draws it; a
+voxel whose chunk is not meshed yet or is out of render distance is not
+picked. No mesh is read on the CPU, which is what lets the vertices go after
+upload; the box round a selected grid's meshes comes from `ModelInfo::bounds`,
+taken when the mesh was built.
 
 `voxel_model_matrix()` (`src/game/Picking.cpp`) builds the matrix a voxel model
 is drawn

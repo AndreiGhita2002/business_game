@@ -75,18 +75,14 @@ ChunkMeshData build_chunk_mesh_data(
 
 /**
  * Uploads what build_chunk_mesh_data() built. Needs an OpenGL context. An
- * empty mesh stays empty (no GPU buffers). Only the vertices and indices are
- * kept on the CPU afterwards.
+ * empty mesh stays empty (no GPU buffers). Only the indices are kept on the
+ * CPU afterwards, as DrawMesh() picks indexed drawing by whether they are
+ * there; take chunk_mesh_bounds() first for anything that needs the vertices.
  */
 Mesh upload_chunk_mesh(const ChunkMeshData& data);
 
-/** The two calls above, one after the other. */
-Mesh build_chunk_mesh(
-    const VoxelChunk& chunk,
-    const VoxelNeighbourSampler& neighbour,
-    const std::map<VoxelID, Color>& palette,
-    Vector3 origin,
-    float voxelSize);
+/** The box round a mesh's vertices, before they go: ModelInfo::bounds. */
+BoundingBox chunk_mesh_bounds(const ChunkMeshData& data);
 
 /**
  * A model of the one mesh, with one material on the voxel shader. The

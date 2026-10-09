@@ -63,6 +63,9 @@ struct ModelInfo {
     bool do_render;
     Model model;
     Transform transform;
+    // The box round the mesh, in the model's own space, taken when it was
+    // built: the CPU copy of the vertices is freed once they are on the GPU
+    BoundingBox bounds{};
 };
 
 /**
@@ -257,6 +260,18 @@ public:
 
     /** Whether a coordinate is inside this grid at all. */
     virtual bool in_bounds(Int3 grid_pos) const = 0;
+
+    /**
+     * How many voxels the grid spans on each axis (x, y, z up), from 0: the
+     * box a ray is walked through when picking (grid_ray_cast()).
+     */
+    virtual Int3 voxel_extent() const = 0;
+
+    /**
+     * The model that draws the voxel at `grid_pos`, or null where there is
+     * none yet (a chunk not meshed so far).
+     */
+    virtual ModelInfo* model_for_voxel(Int3 grid_pos) = 0;
 
     /** Whether the grid holds anything other than air at this coordinate. */
     bool is_solid(Int3 grid_pos);

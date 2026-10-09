@@ -306,13 +306,16 @@ Mesh upload_chunk_mesh(const ChunkMeshData& A) {
 
     UploadMesh(&mesh, false); // static by default
 
-    // The GPU has its own copy now. Only the vertices and indices are read on
-    // the CPU again (the box round a selected grid), so the rest goes, which
-    // is over half of what a chunk keeps in RAM. UnloadMesh() skips a null
-    // array.
+    // The GPU has its own copy now. Nothing reads the vertices on the CPU
+    // again - picking walks the voxels, and the box round a mesh is taken
+    // before it is uploaded (chunk_mesh_bounds()) - so all of it goes but the
+    // indices, which DrawMesh() checks for to draw indexed. UnloadMesh()
+    // skips a null array.
+    MemFree(mesh.vertices);
     MemFree(mesh.normals);
     MemFree(mesh.texcoords);
     MemFree(mesh.colors);
+    mesh.vertices = nullptr;
     mesh.normals = nullptr;
     mesh.texcoords = nullptr;
     mesh.colors = nullptr;
@@ -320,9 +323,19 @@ Mesh upload_chunk_mesh(const ChunkMeshData& A) {
     return mesh;
 }
 
-Mesh build_chunk_mesh(const VoxelChunk& chunk, const VoxelNeighbourSampler& neighbour,
-                      const std::map<VoxelID, Color>& palette, const Vector3 origin, const float voxelSize) {
-    return upload_chunk_mesh(build_chunk_mesh_data(chunk, neighbour, palette, origin, voxelSize));
+BoundingBox chunk_mesh_bounds(const ChunkMeshData& data) {
+    BoundingBox box{};
+    for (size_t i = 0; i + 2 < data.vertices.size(); i += 3) {
+        const Vector3 v{data.vertices[i], data.vertices[i + 1], data.vertices[i + 2]};
+        if (i == 0) {
+            box.min = v;
+            box.max = v;
+        } else {
+            box.min = Vector3Min(box.min, v);
+            box.max = Vector3Max(box.max, v);
+        }
+    }
+    return box;
 }
 
 Model build_chunk_model(const Mesh mesh) {

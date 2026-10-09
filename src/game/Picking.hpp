@@ -104,8 +104,35 @@ BoundingBox voxel_box_bounds(Matrix matrix, float size);
 bool box_casts_onto(const BoundingBox& caster, const BoundingBox& receiver,
                     Vector3 direction, float reach);
 
+/** Where a ray met a grid's first solid voxel. */
+struct GridRayHit {
+    Int3 voxel;
+    // The face it came in through, as the step out of the voxel through that
+    // face: (0, 0, 1) for a voxel hit from above
+    Int3 normal;
+    // How far along the ray, in the ray's own units
+    float t;
+};
+
+/**
+ * Walks `grid`'s voxels along a ray given in the grid's own coordinates (x, y,
+ * z up, a voxel a unit), from where it enters the box voxel_extent() makes, and
+ * finds the first solid one no further than `max_t` along it.
+ *
+ * What picking is built on, in place of testing every triangle of the meshes:
+ * a voxel walk visits only the voxels on the ray, and needs no CPU copy of
+ * any mesh. A ray that starts inside a solid voxel hits it at once, through
+ * the face it is pointing most nearly away from.
+ */
+bool grid_ray_cast(VoxelGrid* grid, Vector3 origin, Vector3 dir, float max_t, GridRayHit* out);
+
 /**
  * Does a ray cast and returns the closest voxel model on the line.
+ *
+ * Each grid is walked voxel by voxel (grid_ray_cast()) with the ray carried
+ * into its own space, so a moved, turned or scaled grid is picked exactly. The
+ * hit's model is the one that draws the voxel; a voxel whose chunk is not
+ * meshed yet, or is out of render distance, is not drawn and so not hit.
  *
  * @param ray: the ray, for mouse ray get it from `GetScreenToWorldRay`
  * @param voxel_grids: a collection of grids that the function should look through.

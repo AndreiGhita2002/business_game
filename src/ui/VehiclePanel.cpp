@@ -203,10 +203,8 @@ void VehiclePanel::draw_selection_highlight() const {
                 if (model_info == nullptr || !model_info->do_render) continue;
                 rlPushMatrix(); {
                     rlMultMatrixf(MatrixToFloat(voxel_model_matrix(grid, *model_info)));
-                    for (int i = 0; i < model_info->model.meshCount; i++) {
-                        DrawBoundingBox(GetMeshBoundingBox(model_info->model.meshes[i]),
-                                        VEHICLE_HIGHLIGHT_COLOUR);
-                    }
+                    // Taken when the mesh was built (ModelInfo::bounds)
+                    if (model_info->model.meshCount > 0) DrawBoundingBox(model_info->bounds, VEHICLE_HIGHLIGHT_COLOUR);
                 }
                 rlPopMatrix();
             }

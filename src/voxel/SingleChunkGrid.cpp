@@ -51,8 +51,8 @@ void SingleChunkGrid::update_models() {
         if (was_updated) {
             // No sampler: a single chunk grid has no neighbouring chunks, so
             // everything outside it is air and every outward face is drawn.
-            auto new_model = build_chunk_model(
-                build_chunk_mesh(data, {}, *voxel_colours, Vector3{0.0,0.0,0.0}, 1.0f));
+            const ChunkMeshData mesh_data = build_chunk_mesh_data(data, {}, *voxel_colours, Vector3{0.0,0.0,0.0}, 1.0f);
+            auto new_model = build_chunk_model(upload_chunk_mesh(mesh_data));
 
             // The previous model would leak its GPU buffers otherwise, and the
             // editor meshes this grid again on every voxel it places
@@ -62,7 +62,7 @@ void SingleChunkGrid::update_models() {
             // identity inside the grid. Where the grid is in the world is added
             // by voxel_model_matrix() at draw time, which is why moving a grid
             // never needs a remesh.
-            model = ModelInfo{true, new_model, identity()};
+            model = ModelInfo{true, new_model, identity(), chunk_mesh_bounds(mesh_data)};
 
             was_updated = false;
         }

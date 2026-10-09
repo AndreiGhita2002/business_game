@@ -318,9 +318,13 @@ void VoxelMap::update_models() {
             side_solid(1, 2, 1, 1, 0) && side_solid(1, 0, 1, 1, CHUNK_SIZE - 1) &&
             side_solid(1, 1, 2, 2, 0) && side_solid(1, 1, 0, 2, CHUNK_SIZE - 1);
 
-        Model new_model = buried
-            ? build_chunk_model(Mesh{})
-            : build_chunk_model(build_chunk_mesh(chunk, neighbour, *voxel_colours, Vector3{0.0, 0.0, 0.0}, 1.0f));
+        Model new_model = build_chunk_model(Mesh{});
+        BoundingBox bounds{};
+        if (!buried) {
+            const ChunkMeshData data = build_chunk_mesh_data(chunk, neighbour, *voxel_colours, Vector3{0.0, 0.0, 0.0}, 1.0f);
+            bounds = chunk_mesh_bounds(data);
+            new_model = build_chunk_model(upload_chunk_mesh(data));
+        }
 
         // A chunk that is meshed again already holds a model, which would
         // leak its GPU buffers if it were simply overwritten. This happens
@@ -328,7 +332,7 @@ void VoxelMap::update_models() {
         const auto chunk_model = chunk_models.find(chunk_pos);
         if (chunk_model != chunk_models.end()) unload_chunk_model(chunk_model->second.model);
 
-        chunk_models[chunk_pos] = ModelInfo{true, new_model, model_transform};
+        chunk_models[chunk_pos] = ModelInfo{true, new_model, model_transform, bounds};
     }
 }
 
@@ -481,6 +485,13 @@ bool VoxelMap::write_voxel(const Int3 grid_pos, const VoxelID id) {
         }
     }
     return true;
+}
+
+ModelInfo* VoxelMap::model_for_voxel(const Int3 grid_pos) {
+    if (!in_bounds(grid_pos)) return nullptr;
+    const auto found = chunk_models.find(Int3{
+        floordiv(grid_pos.x, CHUNK_SIZE), floordiv(grid_pos.y, CHUNK_SIZE), floordiv(grid_pos.z, CHUNK_SIZE)});
+    return found != chunk_models.end() ? &found->second : nullptr;
 }
 
 bool VoxelMap::model_to_grid(const ModelInfo* model, const Vector3 local_pos, Int3* out) {

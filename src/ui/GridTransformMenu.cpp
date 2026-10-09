@@ -474,13 +474,10 @@ void GridTransformMenu::draw_selection_highlight() const {
                 // sits on it whatever the grid and its parents are doing
                 rlMultMatrixf(MatrixToFloat(voxel_model_matrix(selected_grid, *model_info)));
 
-                for (int i = 0; i < model_info->model.meshCount; i++) {
-                    // GetMeshBoundingBox and not GetModelBoundingBox: the
-                    // latter folds model.transform in, which the matrix above
-                    // has already applied, and the box would be moved twice.
-                    DrawBoundingBox(GetMeshBoundingBox(model_info->model.meshes[i]),
-                                    GRID_HIGHLIGHT_COLOUR);
-                }
+                // The box taken when the mesh was built, in the model's own
+                // space, which the matrix above carries into the world. The
+                // mesh's vertices are no longer on the CPU to measure.
+                if (model_info->model.meshCount > 0) DrawBoundingBox(model_info->bounds, GRID_HIGHLIGHT_COLOUR);
             }
             rlPopMatrix();
         }

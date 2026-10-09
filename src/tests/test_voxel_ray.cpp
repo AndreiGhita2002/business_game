@@ -7,6 +7,9 @@
 #include "game/Picking.hpp"
 #include "sim/Rng.hpp"
 
+#include <cfloat>
+#include <cmath>
+
 /**
  * The voxel walk a shadow ray does.
  *
@@ -270,4 +273,95 @@ TEST_CASE("the coarse walk stops, lit, when its steps run out", "[voxelray][coar
     const Vector3 down{0.0f, 0.0f, -1.0f};
     REQUIRE(volume_march_coarse(fine, coarse, world.size, origin, down, 256, nullptr));
     REQUIRE_FALSE(volume_march_coarse(fine, coarse, world.size, origin, down, 0, nullptr));
+}
+
+// --- Picking: the walk through a grid's voxels ---
+
+TEST_CASE("a pick finds the voxel, the face it came in through, and how far", "[voxelray][pick]") {
+    const auto palette = make_palette();
+    SingleChunkGrid grid(nullptr, palette);
+    grid.set_voxel(Int3{3, 4, 5}, 1);
+    GridRayHit hit{};
+
+    SECTION("from above, starting outside the grid") {
+        REQUIRE(grid_ray_cast(&grid, Vector3{3.5f, 4.5f, 20.0f}, Vector3{0, 0, -1}, FLT_MAX, &hit));
+        REQUIRE(hit.voxel == Int3{3, 4, 5});
+        REQUIRE(hit.normal == Int3{0, 0, 1});
+        REQUIRE(hit.t == Catch::Approx(14.0f));   // down to the voxel's top, at 6
+    }
+    SECTION("from the side, inside the grid") {
+        REQUIRE(grid_ray_cast(&grid, Vector3{0.5f, 4.5f, 5.5f}, Vector3{1, 0, 0}, FLT_MAX, &hit));
+        REQUIRE(hit.voxel == Int3{3, 4, 5});
+        REQUIRE(hit.normal == Int3{-1, 0, 0});
+        REQUIRE(hit.t == Catch::Approx(2.5f));
+    }
+    SECTION("a direction that is not a unit keeps its own t") {
+        REQUIRE(grid_ray_cast(&grid, Vector3{0.5f, 4.5f, 5.5f}, Vector3{2, 0, 0}, FLT_MAX, &hit));
+        REQUIRE(hit.t == Catch::Approx(1.25f));
+    }
+    SECTION("past the furthest it may look, or off to one side, nothing") {
+        REQUIRE_FALSE(grid_ray_cast(&grid, Vector3{3.5f, 4.5f, 20.0f}, Vector3{0, 0, -1}, 10.0f, &hit));
+        REQUIRE_FALSE(grid_ray_cast(&grid, Vector3{8.5f, 4.5f, 20.0f}, Vector3{0, 0, -1}, FLT_MAX, &hit));
+        REQUIRE_FALSE(grid_ray_cast(&grid, Vector3{3.5f, 4.5f, 20.0f}, Vector3{0, 0, 1}, FLT_MAX, &hit));
+    }
+    SECTION("starting inside a solid voxel hits it at once") {
+        REQUIRE(grid_ray_cast(&grid, Vector3{3.5f, 4.5f, 5.5f}, Vector3{0, 0, -1}, FLT_MAX, &hit));
+        REQUIRE(hit.voxel == Int3{3, 4, 5});
+        REQUIRE(hit.t == 0.0f);
+        REQUIRE(hit.normal == Int3{0, 0, 1});
+    }
+}
+
+TEST_CASE("a pick walks a sparse world map", "[voxelray][pick]") {
+    // A map far bigger than its one chunk of ground, picked from high above at
+    // a slant, the way the camera looks at it
+    VoxelMap map(nullptr, 512, 512, 64);
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 16; ++x) REQUIRE(map.set_voxel(Int3{200 + x, 300 + y, 2}, 1));
+
+    const Vector3 target{208.5f, 308.5f, 3.0f};
+    const Vector3 from{150.0f, 250.0f, 120.0f};
+    GridRayHit hit{};
+    REQUIRE(grid_ray_cast(&map, from, Vector3Normalize(Vector3Subtract(target, from)), FLT_MAX, &hit));
+    REQUIRE(hit.voxel == Int3{208, 308, 2});
+    REQUIRE(hit.normal == Int3{0, 0, 1});
+}
+
+TEST_CASE("a pick and the shadow walk agree on what a ray meets", "[voxelray][pick]") {
+    const auto palette = make_palette();
+    SingleChunkGrid grid(nullptr, palette);
+    sim::Rng rng(5);
+    for (int i = 0; i < 200; ++i) {
+        grid.set_voxel(Int3{static_cast<int>(rng.next_below(16)), static_cast<int>(rng.next_below(16)),
+                            static_cast<int>(rng.next_below(16))}, 1);
+    }
+    const VolumeSolid solid = [&grid](const Int3 v) { return grid.is_solid(v); };
+
+    for (int i = 0; i < 2000; ++i) {
+        const Vector3 origin = {-6.0f + unit(rng) * 28.0f, -6.0f + unit(rng) * 28.0f, -6.0f + unit(rng) * 28.0f};
+        const Vector3 dir = Vector3Normalize(Vector3{unit(rng) - 0.5f, unit(rng) - 0.5f, unit(rng) - 0.5f});
+        GridRayHit hit{};
+        const bool picked = grid_ray_cast(&grid, origin, dir, FLT_MAX, &hit);
+        REQUIRE(picked == volume_march(solid, Int3{16, 16, 16}, origin, dir, 100000, nullptr));
+        if (!picked) continue;
+
+        // What it found is solid, and the point it reports is on the face it
+        // names: half a voxel back out through that face is the cell in front
+        REQUIRE(grid.is_solid(hit.voxel));
+        const Vector3 point = Vector3Add(origin, Vector3Scale(dir, hit.t));
+        const Vector3 in_front = {point.x + 0.5f * static_cast<float>(hit.normal.x),
+                                  point.y + 0.5f * static_cast<float>(hit.normal.y),
+                                  point.z + 0.5f * static_cast<float>(hit.normal.z)};
+        const Vector3 behind = {point.x - 0.5f * static_cast<float>(hit.normal.x),
+                                point.y - 0.5f * static_cast<float>(hit.normal.y),
+                                point.z - 0.5f * static_cast<float>(hit.normal.z)};
+        // Starting inside the voxel there is no face in front to check
+        if (hit.t > 0.0f) {
+            REQUIRE(Int3{static_cast<int>(std::floor(behind.x)), static_cast<int>(std::floor(behind.y)),
+                         static_cast<int>(std::floor(behind.z))} == hit.voxel);
+            REQUIRE_FALSE(grid.is_solid(Int3{static_cast<int>(std::floor(in_front.x)),
+                                             static_cast<int>(std::floor(in_front.y)),
+                                             static_cast<int>(std::floor(in_front.z))}));
+        }
+    }
 }
