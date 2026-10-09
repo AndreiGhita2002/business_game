@@ -143,18 +143,41 @@ private:
     void updateVoxelMesh() const;
     void updateVolumes();
 
+    // A model that passed the camera test this frame, with what drawing it needs
+    struct DrawItem {
+        const ModelInfo* model;
+        Matrix matrix;
+        BoundingBox box;
+        // Squared distance from the camera to the box's centre, for the order
+        float distance_sq;
+    };
+    // A grid with an atlas brick, worked out once a frame rather than once
+    // for every model it might shadow
+    struct ShadowCaster {
+        BoundingBox box;
+        Matrix world_to_grid;
+        float atlas_origin[3];
+    };
+    // Kept between frames so their memory is too
+    std::vector<DrawItem> draw_list;
+    std::vector<ShadowCaster> shadow_casters;
+
     // Drawing Functions
     // Should always be within a BeginMode3D()/EndMode3D() block.
     void drawVoxelScene();
-    void drawVoxelModel(const VoxelGrid* grid, const ModelInfo& model_info);
+    void drawVoxelModel(const DrawItem& item);
     void drawLightMarkers() const;
 
     // Puts the volumes and their uniforms on the shader for this frame
     void bindWorldVolume() const;
 
-    // Picks the grids whose shadows could land on this model and sends them,
-    // so that a fragment only traces the few volumes that could reach it
-    void sendGridVolumes(const VoxelGrid* receiver, const ModelInfo& model_info);
+    // Fills shadow_casters for this frame
+    void gatherShadowCasters();
+
+    // Picks the casters whose shadows could land on a model with this box and
+    // sends them, so that a fragment only traces the few volumes that could
+    // reach it
+    void sendGridVolumes(const BoundingBox& receiver_box);
 };
 
 

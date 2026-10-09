@@ -133,6 +133,14 @@ bool find_voxel_on_ray(const Ray ray, const std::vector<VoxelGrid*>* voxel_grids
 
             const Matrix world_mat = voxel_model_matrix(grid, *model_info);
 
+            // Every model is meshed inside its own chunk's cube, so a ray that
+            // misses the cube, or reaches it only past the best hit so far,
+            // cannot hit a triangle in it. raylib's mesh test has no such
+            // early out and walks every triangle, which over a whole island
+            // is most of a frame.
+            const RayCollision box = GetRayCollisionBox(ray, voxel_box_bounds(world_mat, CHUNK_SIZE));
+            if (!box.hit || box.distance >= best.collision.distance) continue;
+
             for (int i = 0; i < model_info->model.meshCount; ++i) {
                 RayCollision c = GetRayCollisionMesh(ray, model_info->model.meshes[i], world_mat);
 

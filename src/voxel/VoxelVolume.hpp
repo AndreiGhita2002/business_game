@@ -34,11 +34,12 @@ public:
     VoxelVolume& operator=(const VoxelVolume&) = delete;
 
     /**
-     * Allocates the texture as all air. Sizes are in voxels, and should be
-     * whole chunks, as upload_chunk() refuses a chunk that hangs over the edge.
-     * Replaces whatever was there before.
+     * Allocates the texture, from `voxels` (size_voxels of them, x fastest,
+     * then y, then z) in one upload, or as all air when that is null. Sizes
+     * are in voxels, and should be whole chunks, as upload_chunk() refuses a
+     * chunk that hangs over the edge. Replaces whatever was there before.
      */
-    void create(Int3 size_voxels);
+    void create(Int3 size_voxels, const VoxelID* voxels = nullptr);
 
     /** Frees the texture. Safe to call on a volume that has none. */
     void destroy();

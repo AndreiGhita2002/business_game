@@ -185,6 +185,8 @@ private:
     // per unit (so a wave shader has vertices to move), shared by every chunk.
     // A chunk that is cut short at the edge is drawn scaled down to fit.
     Mesh chunk_mesh{};
+    // The same square as a single quad, for the sea floor, which never moves
+    Mesh floor_mesh{};
     // Carries the water shader, which it owns: UnloadMaterial() unloads it.
     Material material{};
 

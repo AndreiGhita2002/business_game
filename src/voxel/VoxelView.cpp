@@ -5,8 +5,10 @@
 #include "VoxelView.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <rlgl.h>
 
+#include "game/Frustum.hpp"
 #include "game/main.hpp"
 #include "voxel/SingleChunkGrid.hpp"
 
@@ -253,10 +255,19 @@ void VoxelView::set_volume_window(const Int3 origin, const Int3 size) {
 
     world_volume_origin = start;
     // Never empty, so the shader always has a texture to read
-    world_volume.create(Int3{std::max(end.x - start.x, CHUNK_SIZE), std::max(end.y - start.y, CHUNK_SIZE),
-                             std::max(end.z, CHUNK_SIZE)});
-    world_volume_top = 0;
-    for (auto& [chunk_pos, dirty] : game_map->chunk_volume_dirty) dirty = true;
+    const Int3 volume_size{std::max(end.x - start.x, CHUNK_SIZE), std::max(end.y - start.y, CHUNK_SIZE),
+                           std::max(end.z, CHUNK_SIZE)};
+
+    // The map's chunks copied into the window here and sent in the one upload
+    // that makes the texture, rather than as a GL call each on the next frame.
+    // calloc, as a fresh volume is air wherever no chunk is.
+    auto* voxels = static_cast<VoxelID*>(std::calloc(
+        static_cast<size_t>(volume_size.x) * static_cast<size_t>(volume_size.y) * static_cast<size_t>(volume_size.z), 1));
+    if (voxels != nullptr) game_map->copy_window(voxels, start, volume_size);
+    else for (auto& [chunk_pos, dirty] : game_map->chunk_volume_dirty) dirty = true;
+    world_volume.create(volume_size, voxels);
+    std::free(voxels);
+    world_volume_top = game_map->solid_top();
 }
 
 VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader, const Int3 map_size)
@@ -359,6 +370,13 @@ void VoxelView::add_grid_removal_listener(GridRemovalListener listener) {
 }
 
 void VoxelView::drawVoxelScene() {
+    // Taken from rlgl inside the 3D block, as the water does, so the culling
+    // agrees with the projection BeginMode3D() set up. Shadows are traced
+    // through the volumes, not drawn, so a chunk off screen casts its shadow
+    // all the same.
+    const Frustum frustum = frustum_from_matrix(MatrixMultiply(rlGetMatrixModelview(), rlGetMatrixProjection()));
+
+    draw_list.clear();
     for (VoxelGrid* grid : voxel_grids) {
         for (ModelInfo* model_info : grid->get_models()) {
             // SingleChunkGrid reports a null model until it has been meshed,
@@ -366,22 +384,40 @@ void VoxelView::drawVoxelScene() {
             // view's update has run (the editor's "New Grid" does this). A
             // model out of render distance is still listed, switched off.
             if (model_info == nullptr || !model_info->do_render) continue;
-            drawVoxelModel(grid, *model_info);
+
+            // Built by voxel_model_matrix(), which the editor's ray casts also
+            // use, so a click always lands on what is actually drawn. Every
+            // model is meshed inside its chunk's cube, so that cube is its box.
+            const Matrix matrix = voxel_model_matrix(grid, *model_info);
+            const BoundingBox box = voxel_box_bounds(matrix, CHUNK_SIZE);
+            if (!frustum_contains_box(frustum, box)) continue;
+
+            const Vector3 centre = Vector3Scale(Vector3Add(box.min, box.max), 0.5f);
+            draw_list.push_back(DrawItem{model_info, matrix, box,
+                                         Vector3DistanceSqr(camera.position, centre)});
         }
     }
+
+    // Nearest first. Every fragment marches a shadow ray, and one drawn over
+    // later has paid for its march for nothing; near ones first lets the depth
+    // test throw the hidden ones away before the fragment shader runs.
+    std::sort(draw_list.begin(), draw_list.end(), [](const DrawItem& a, const DrawItem& b) {
+        return a.distance_sq < b.distance_sq;
+    });
+
+    gatherShadowCasters();
+    for (const DrawItem& item : draw_list) drawVoxelModel(item);
 }
 
-void VoxelView::drawVoxelModel(const VoxelGrid* grid, const ModelInfo& model_info) {
-    // The transform is built by voxel_model_matrix(), which the editor's ray
-    // casts also use, so a click always lands on what is actually drawn.
+void VoxelView::drawVoxelModel(const DrawItem& item) {
     // The Model is copied by value, as DrawModel would do anyway, and only the
     // matrix on the copy is replaced. The meshes are shared, not duplicated.
-    Model model = model_info.model;
-    model.transform = voxel_model_matrix(grid, model_info);
+    Model model = item.model->model;
+    model.transform = item.matrix;
 
     // Which grids could throw a shadow onto this model. Sent per draw, as the
     // answer is different for every chunk.
-    sendGridVolumes(grid, model_info);
+    sendGridVolumes(item.box);
 
     // Drawing the model
     DrawModel(model, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
@@ -390,44 +426,44 @@ void VoxelView::drawVoxelModel(const VoxelGrid* grid, const ModelInfo& model_inf
     // DrawModelWires(model, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, DARKGRAY);
 }
 
-void VoxelView::sendGridVolumes(const VoxelGrid* receiver, const ModelInfo& model_info) {
+void VoxelView::gatherShadowCasters() {
+    shadow_casters.clear();
+    if (!grid_atlas.is_created() || !lights[sun_light_id].enabled) return;
+
+    for (const VoxelGrid* grid : voxel_grids) {
+        // No brick, nothing to trace. The map is always in this state, as it
+        // lives in the world volume instead.
+        if (grid == nullptr || grid->volume_slot < 0) continue;
+
+        const Matrix grid_matrix = transform_to_matrix(grid->get_world_transform());
+        const Int3 origin = grid_atlas.slot_origin(grid->volume_slot);
+        shadow_casters.push_back(ShadowCaster{
+            voxel_box_bounds(grid_matrix, CHUNK_SIZE),
+            // The matrix that undoes the grid, so the shader can trace the
+            // ray in the grid's own space where its voxels are axis aligned
+            // again
+            MatrixInvert(grid_matrix),
+            {static_cast<float>(origin.x), static_cast<float>(origin.y), static_cast<float>(origin.z)},
+        });
+    }
+}
+
+void VoxelView::sendGridVolumes(const BoundingBox& receiver_box) {
     int count = 0;
 
-    const Light& sun = lights[sun_light_id];
-    if (grid_atlas.is_created() && sun.enabled) {
-        // Where this model is, and which way the light runs. A grid is worth
-        // tracing only if its own box, dragged along that direction, still
-        // reaches the model: everything else is left out of the list here
-        // rather than walked away from per pixel.
-        const BoundingBox receiver_box =
-            voxel_box_bounds(voxel_model_matrix(receiver, model_info), CHUNK_SIZE);
-        const Vector3 sun_direction = sun.get_direction();
+    if (!shadow_casters.empty()) {
+        // A grid is worth tracing only if its own box, dragged along the
+        // light, still reaches the model: everything else is left out of the
+        // list here rather than walked away from per pixel. A grid always
+        // reaches itself, which is what shadows a vehicle with its own shape.
+        const Vector3 sun_direction = lights[sun_light_id].get_direction();
 
-        for (const VoxelGrid* grid : voxel_grids) {
+        for (const ShadowCaster& caster : shadow_casters) {
             if (count >= MAX_GRID_VOLUMES) break;
-            // No brick, nothing to trace. The map is always in this state, as
-            // it lives in the world volume instead.
-            if (grid == nullptr || grid->volume_slot < 0) continue;
+            if (!box_casts_onto(caster.box, receiver_box, sun_direction, SHADOW_CASTER_REACH)) continue;
 
-            const Matrix grid_matrix = transform_to_matrix(grid->get_world_transform());
-            const BoundingBox caster_box = voxel_box_bounds(grid_matrix, CHUNK_SIZE);
-            if (!box_casts_onto(caster_box, receiver_box, sun_direction, SHADOW_CASTER_REACH))
-                continue;
-
-            // The matrix that undoes the grid, so the shader can trace the ray
-            // in the grid's own space where its voxels are axis aligned again.
-            // A grid always reaches itself, which is what shadows a vehicle
-            // with its own shape.
-            SetShaderValueMatrix(*voxel_shader, grid_volume_matrix_loc[count],
-                                 MatrixInvert(grid_matrix));
-
-            const Int3 origin = grid_atlas.slot_origin(grid->volume_slot);
-            const float s_origin[3] = {
-                static_cast<float>(origin.x),
-                static_cast<float>(origin.y),
-                static_cast<float>(origin.z),
-            };
-            SetShaderValue(*voxel_shader, grid_volume_origin_loc[count], s_origin, SHADER_UNIFORM_VEC3);
+            SetShaderValueMatrix(*voxel_shader, grid_volume_matrix_loc[count], caster.world_to_grid);
+            SetShaderValue(*voxel_shader, grid_volume_origin_loc[count], caster.atlas_origin, SHADER_UNIFORM_VEC3);
             count++;
         }
     }

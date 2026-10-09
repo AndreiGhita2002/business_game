@@ -455,10 +455,12 @@ void global::start_world() {
     map.resize(static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y), static_cast<uint32_t>(size.z));
     build_terrain_voxels(map, terrain);
 
-    // The box round the land cells, how tall the land gets, and a square of
-    // sea floor for every ocean cell, which the map does not hold
+    // The box round the land cells, and a square of sea floor for every ocean
+    // cell, which the map does not hold. How tall the land gets is the map's
+    // highest voxel, now that the land is drawn into it.
     const int cell_voxels = terrain.cell_blocks() * BLOCK_VOXELS;
-    int land_min_x = size.x, land_min_y = size.y, land_max_x = 0, land_max_y = 0, land_top = 0;
+    const int land_top = map.solid_top();
+    int land_min_x = size.x, land_min_y = size.y, land_max_x = 0, land_max_y = 0;
     std::vector<WaterChunk> floor;
     for (int cell_y = 0; cell_y < terrain.cells_y(); ++cell_y) {
         for (int cell_x = 0; cell_x < terrain.cells_x(); ++cell_x) {
@@ -473,13 +475,6 @@ void global::start_world() {
             land_min_y = std::min(land_min_y, y);
             land_max_x = std::max(land_max_x, x + cell_voxels);
             land_max_y = std::max(land_max_y, y + cell_voxels);
-            const int block_x = cell_x * terrain.cell_blocks();
-            const int block_y = cell_y * terrain.cell_blocks();
-            for (int by = block_y; by < block_y + terrain.cell_blocks(); ++by) {
-                for (int bx = block_x; bx < block_x + terrain.cell_blocks(); ++bx) {
-                    land_top = std::max(land_top, terrain.column_height(bx, by));
-                }
-            }
         }
     }
     const bool any_land = land_max_x > land_min_x;
@@ -488,7 +483,7 @@ void global::start_world() {
     // view, so nothing there casts or catches a shadow from the volume.
     if (any_land) {
         voxel_view->set_volume_window(Int3{land_min_x, land_min_y, 0},
-            Int3{land_max_x - land_min_x, land_max_y - land_min_y, land_top * BLOCK_VOXELS});
+            Int3{land_max_x - land_min_x, land_max_y - land_min_y, land_top});
     } else {
         voxel_view->set_volume_window(Int3{0, 0, 0}, Int3{CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE});
     }

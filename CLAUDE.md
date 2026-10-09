@@ -355,7 +355,7 @@ The UI/scene uses a `ViewNode` tree hierarchy with recursive update/render trave
 ### Voxel System
 
 **VoxelGrid** (abstract base in `src/voxel/VoxelGrid.hpp`) has two implementations:
-- **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks keyed by `Int3`), any number of chunks tall (`get_height()`; the game's is 256 voxels, 16 chunks), the size of the whole world (2560 voxels across by default). **Sparse**: a chunk only exists once something is written to it (`ensure_chunk()`, which `write_voxel()` calls; air into a missing chunk does nothing), and `get_voxel()` is null where there is none, so read through `is_solid()` or check for null. `clear()` drops every chunk and its model, `resize()` is a new size of air. It starts as air: the terrain is the simulation's, drawn in by `entity/TerrainVoxels`. A write on a chunk's border remeshes only the neighbours that exist.
+- **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks keyed by `Int3`), any number of chunks tall (`get_height()`; the game's is 256 voxels, 16 chunks), the size of the whole world (2560 voxels across by default). **Sparse**: a chunk only exists once something is written to it (`ensure_chunk()`, which `write_voxel()` calls; air into a missing chunk does nothing), and `get_voxel()` is null where there is none, so read through `is_solid()` or check for null. `clear()` drops every chunk and its model, `resize()` is a new size of air. It starts as air: the terrain is the simulation's, drawn in by `entity/TerrainVoxels`. A write on a chunk's border remeshes only the neighbours that exist. `update_models()` visits only the chunks marked in `chunk_was_updated` (and every model only when the render distance is limited), looks a chunk's 26 neighbours up once rather than per voxel, counts **below the map as solid** (so the underside is never meshed), and gives a chunk that is solid all through with solid on all six sides an empty model without running the mesher - most of an island. `solid_top()` is one pass over the chunks.
 - **SingleChunkGrid** (`src/voxel/SingleChunkGrid.cpp/hpp`) - Single chunk for the voxel editor
 
 **VoxelMesher** (`src/voxel/VoxelMesher.cpp/hpp`) converts voxel data to 3D
@@ -374,6 +374,8 @@ meshes with per-material generation.
   (`vertex_ao()`), and the quad is split along the darker diagonal so the shade
   does not crease the wrong way. `AO_SHADE` is the brightness of the four
   levels, so changing it means remeshing.
+- After upload only the vertices and indices stay in RAM (picking and the
+  selection boxes read them); normals, UVs and colours are freed.
 - The colours are a shade, not a tint. `lighting.fs` reads `fragColor.r` as the
   occlusion and no longer multiplies the vertex colour into the material.
 
@@ -390,7 +392,10 @@ whole chunks, z from 0. `world_volume_origin` is where it starts:
 `update_volume()` uploads a chunk at its place less that origin and skips one
 outside, and `bindWorldVolume()` puts a translation by minus the origin after
 the map's inverse, so the shader and its C++ twin are unchanged. Outside the
-window nothing casts a shadow. The shader is told it ends at
+window nothing casts a shadow. A new window is filled on the CPU
+(`VoxelMap::copy_window()`) and sent in the one call that makes the texture,
+which leaves no chunk marked; after that, edits go up a chunk at a time
+through `update_volume()`. The shader is told it ends at
 `VoxelView::world_volume_top`, the map's `solid_top()` (one above its highest
 solid layer), refreshed whenever `update_volume()` uploads anything. Nothing
 above that can block a ray, so a ray leaving the shorter box is exactly as lit,
@@ -552,6 +557,14 @@ Two-pass system in `src/voxel/VoxelView.cpp/hpp`:
 1. **Main Pass** - Render with the lighting shader, which traces its own shadows
 2. **UI Pass** - Overlay UI elements
 
+`drawVoxelScene()` draws only the models whose chunk cube (`voxel_box_bounds`
+of their matrix) is inside the camera's frustum, taken from rlgl inside the 3D
+block as the water does, and draws them **nearest first**, so the depth test
+throws away hidden fragments before they march a shadow ray. Culling changes
+nothing about shadows, which come from the volumes. The grids with atlas
+bricks are gathered once a frame (`gatherShadowCasters()`, box and inverse
+matrix each), and each draw only tests their boxes against its own.
+
 Lighting supports directional + point lights. Shaders in `resources/shaders/`
 are patched at runtime for the light count, and nothing else.
 
@@ -642,7 +655,8 @@ and saved in `CORE`. Nothing in the simulation reads it yet.
   drawn here too: `set_floor()` takes a square per ocean cell and a height
   (`start_world()` hands in the sea floor's top), drawn first, opaque in
   `floor_colour`, through the same mesh, shader and culling with the waves
-  stilled. Unlit, so its colour is a stand-in for lit stone.
+  stilled, but with a mesh of its own: one quad per square, as it has no
+  waves to need vertices for. Unlit, so its colour is a stand-in for lit stone.
 - Only chunks inside the camera's frustum are drawn: `game/Frustum` extracts
   the planes from terrain x `rlGetMatrixModelview()` x `rlGetMatrixProjection()`
   inside the 3D block, so the culling always agrees with what `BeginMode3D()`
@@ -747,6 +761,10 @@ single raygui call inside one UINode subclass's `draw()`, keeping UIView in char
 of hit-testing and `mouse_consumed`. Do not convert the framework wholesale.
 
 ### Picking
+
+`find_voxel_on_ray()` tests a model's chunk cube first and skips the model if
+the ray misses it or reaches it only past the best hit so far, as raylib's
+`GetRayCollisionMesh` walks every triangle with no early out of its own.
 
 `voxel_model_matrix()` (`src/game/Picking.cpp`) builds the matrix a voxel model
 is drawn

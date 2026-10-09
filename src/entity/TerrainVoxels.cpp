@@ -126,6 +126,8 @@ bool build_terrain_voxels(VoxelMap& map, const sim::Terrain& terrain) {
     // one. Every chunk is new, and ensure_chunk() marks a new one.
     bool all_fit = true;
     const int32_t cell = terrain.cell_blocks();
+    VoxelChunk* last_chunk = nullptr;
+    Int3 last_chunk_pos{0, 0, 0};
     for (int32_t cell_y = 0; cell_y < terrain.cells_y(); ++cell_y) {
         for (int32_t cell_x = 0; cell_x < terrain.cells_x(); ++cell_x) {
             if (terrain.is_ocean_cell(cell_x, cell_y)) continue;
@@ -148,9 +150,32 @@ bool build_terrain_voxels(VoxelMap& map, const sim::Terrain& terrain) {
                             all_fit = false;
                             continue;
                         }
-                        // The whole block is in this one chunk
-                        VoxelChunk& chunk = map.ensure_chunk(Int3{
-                            base.x / CHUNK_SIZE, base.y / CHUNK_SIZE, base.z / CHUNK_SIZE});
+                        // The whole block is in this one chunk. Blocks come up a
+                        // column at a time, four to a chunk, so the last chunk
+                        // is kept rather than looked up in the map again; a
+                        // map's chunks never move once made.
+                        const Int3 chunk_pos{base.x / CHUNK_SIZE, base.y / CHUNK_SIZE, base.z / CHUNK_SIZE};
+                        if (last_chunk == nullptr || !(chunk_pos == last_chunk_pos)) {
+                            last_chunk = &map.ensure_chunk(chunk_pos);
+                            last_chunk_pos = chunk_pos;
+                        }
+                        VoxelChunk& chunk = *last_chunk;
+
+                        // A plain block wholly inside the map, which is nearly
+                        // every one, is one colour all through: a row of voxels
+                        // at a time instead of a voxel at a time
+                        const Int3 far{base.x + LAST, base.y + LAST, base.z + LAST};
+                        if (detail == BlockDetail{} && type != sim::BlockType::Grass && map.in_bounds(far)) {
+                            const VoxelID id = block_voxel(type, detail, Int3{0, 0, 0});
+                            for (int vz = 0; vz < BLOCK_VOXELS; ++vz) {
+                                for (int vy = 0; vy < BLOCK_VOXELS; ++vy) {
+                                    VoxelID* row = VoxelMap::get_chunk_voxel(chunk, Int3{
+                                        base.x % CHUNK_SIZE, (base.y + vy) % CHUNK_SIZE, (base.z + vz) % CHUNK_SIZE});
+                                    std::fill_n(row, BLOCK_VOXELS, id);
+                                }
+                            }
+                            continue;
+                        }
 
                         for (int vz = 0; vz < BLOCK_VOXELS; ++vz) {
                             for (int vy = 0; vy < BLOCK_VOXELS; ++vy) {

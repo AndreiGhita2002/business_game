@@ -370,6 +370,33 @@ TEST_CASE("every block type has a colour in the map's palette", "[terrain]") {
     }
 }
 
+TEST_CASE("a window of the map is copied out for the shadow volume", "[terrain]") {
+    // Three chunks across and two tall; the window is the middle and right
+    // hand columns of chunks, the bottom two chunks deep
+    VoxelMap map(nullptr, 48, 32, 32);
+    REQUIRE(map.set_voxel(Int3{17, 2, 3}, 5));    // in the window
+    REQUIRE(map.set_voxel(Int3{47, 15, 31}, 6));  // the window's far corner
+    REQUIRE(map.set_voxel(Int3{3, 3, 3}, 7));     // left of it
+    REQUIRE(map.set_voxel(Int3{20, 20, 3}, 8));   // past it on y
+
+    const Int3 origin{16, 0, 0};
+    const Int3 size{32, 16, 32};
+    std::vector<VoxelID> out(static_cast<size_t>(size.x) * size.y * size.z, 0);
+    map.copy_window(out.data(), origin, size);
+
+    const auto at = [&](const int x, const int y, const int z) {
+        return out[(x - origin.x) + (y - origin.y) * size.x + (z - origin.z) * size.x * size.y];
+    };
+    REQUIRE(at(17, 2, 3) == 5);
+    REQUIRE(at(47, 15, 31) == 6);
+    int solid = 0;
+    for (const VoxelID v : out) solid += v != 0;
+    REQUIRE(solid == 2);
+
+    // A volume made from this is up to date with every chunk
+    for (const auto& [chunk_pos, dirty] : map.chunk_volume_dirty) REQUIRE_FALSE(dirty);
+}
+
 TEST_CASE("a map several chunks tall", "[terrain]") {
     VoxelMap map(nullptr, 16, 16, 40);
     REQUIRE(map.get_height() == 40);

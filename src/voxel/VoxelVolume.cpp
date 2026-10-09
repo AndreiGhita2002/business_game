@@ -4,7 +4,7 @@
 
 #include "voxel/VoxelVolume.hpp"
 
-#include <vector>
+#include <cstdlib>
 
 #include <raylib.h>
 // raylib has no 3D textures, so this file calls OpenGL itself. glad comes from
@@ -18,7 +18,7 @@ VoxelVolume::~VoxelVolume() {
     destroy();
 }
 
-void VoxelVolume::create(const Int3 size_voxels) {
+void VoxelVolume::create(const Int3 size_voxels, const VoxelID* voxels) {
     destroy();
 
     if (size_voxels.x <= 0 || size_voxels.y <= 0 || size_voxels.z <= 0) {
@@ -31,15 +31,23 @@ void VoxelVolume::create(const Int3 size_voxels) {
     glGenTextures(1, &texture_id);
     glBindTexture(GL_TEXTURE_3D, texture_id);
 
-    // Filled with zeros rather than left undefined, so that a volume starts as
-    // air everywhere, including any part of it no chunk is ever written to.
-    const std::vector<VoxelID> air(
-        static_cast<size_t>(size.x) * static_cast<size_t>(size.y) * static_cast<size_t>(size.z), 0);
+    // Without voxels to start from, filled with zeros rather than left
+    // undefined, so that a volume starts as air everywhere, including any part
+    // of it no chunk is ever written to. calloc rather than a vector: a volume
+    // is tens of megabytes, which a vector fills a byte at a time in a debug
+    // build, where calloc hands back pages that are already zero.
+    VoxelID* air = nullptr;
+    if (voxels == nullptr) {
+        air = static_cast<VoxelID*>(
+            std::calloc(static_cast<size_t>(size.x) * static_cast<size_t>(size.y) * static_cast<size_t>(size.z), 1));
+        voxels = air;
+    }
 
     // One byte per voxel, so rows are not padded to any alignment
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage3D(GL_TEXTURE_3D, 0, GL_R8, size.x, size.y, size.z, 0,
-                 GL_RED, GL_UNSIGNED_BYTE, air.data());
+                 GL_RED, GL_UNSIGNED_BYTE, voxels);
+    std::free(air);
 
     // Nearest and clamped: the shader reads whole voxels, and blending two of
     // them into a half solid one would put shadows where no voxel is.

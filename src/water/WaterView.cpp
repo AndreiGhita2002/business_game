@@ -53,6 +53,9 @@ WaterView::WaterView(ViewNode* parent, const raylib::Camera* camera, const int s
       chunks(water_chunk_layout(size_x, size_z, WATER_CHUNK_SIZE))
 {
     chunk_mesh = GenMeshPlane(WATER_CHUNK_SIZE, WATER_CHUNK_SIZE, WATER_CHUNK_SIZE, WATER_CHUNK_SIZE);
+    // The same square as one quad: the sea floor is still, so it needs no
+    // vertices for waves, and a quad is all a flat square costs
+    floor_mesh = GenMeshPlane(WATER_CHUNK_SIZE, WATER_CHUNK_SIZE, 1, 1);
 
     // LoadShader() falls back to raylib's default shader if either file fails,
     // and logs why, so a broken water shader shows up as untinted white water
@@ -71,6 +74,7 @@ WaterView::WaterView(ViewNode* parent, const raylib::Camera* camera, const int s
 
 WaterView::~WaterView() {
     UnloadMesh(chunk_mesh);
+    UnloadMesh(floor_mesh);
     // Unloads the water shader with it, as it is not raylib's default one
     UnloadMaterial(material);
 }
@@ -123,7 +127,7 @@ void WaterView::render() {
 
     // Draws every square of `squares` the camera can see at height y. The
     // colour and amplitude are whatever the shader was last given.
-    const auto draw_squares = [this, &terrain](const Frustum& frustum, const std::vector<WaterChunk>& squares,
+    const auto draw_squares = [this, &terrain](const Mesh& mesh, const Frustum& frustum, const std::vector<WaterChunk>& squares,
                                                const float y) {
         size_t visible = 0;
         for (const WaterChunk& chunk : squares) {
@@ -136,7 +140,7 @@ void WaterView::render() {
                 chunk.width / WATER_CHUNK_SIZE, chunk.depth / WATER_CHUNK_SIZE,
             };
             SetShaderValue(material.shader, chunk_rect_loc, &rect, SHADER_UNIFORM_VEC4);
-            DrawMesh(chunk_mesh, material, chunk_matrix(chunk, y, terrain));
+            DrawMesh(mesh, material, chunk_matrix(chunk, y, terrain));
             visible++;
         }
         return visible;
@@ -161,13 +165,13 @@ void WaterView::render() {
             const float still = 0.0f;
             SetShaderValue(material.shader, colour_loc, &floor_normalised, SHADER_UNIFORM_VEC4);
             SetShaderValue(material.shader, wave_amplitude_loc, &still, SHADER_UNIFORM_FLOAT);
-            draw_squares(frustum, floor_rects, floor_height);
+            draw_squares(floor_mesh, frustum, floor_rects, floor_height);
         }
 
         const Vector4 colour_normalised = ColorNormalize(colour);
         SetShaderValue(material.shader, colour_loc, &colour_normalised, SHADER_UNIFORM_VEC4);
         SetShaderValue(material.shader, wave_amplitude_loc, &amplitude, SHADER_UNIFORM_FLOAT);
-        visible_last_frame = draw_squares(frustum, chunks, surface_y);
+        visible_last_frame = draw_squares(chunk_mesh, frustum, chunks, surface_y);
 
         rlEnableBackfaceCulling();
     }

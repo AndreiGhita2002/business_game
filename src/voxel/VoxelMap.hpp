@@ -86,6 +86,17 @@ public:
     bool update_volume(VoxelVolume& volume, Int3 window_origin = Int3{0, 0, 0});
 
     /**
+     * The voxels of the window from `origin` of `size` (both in voxels, whole
+     * chunks), x fastest, then y, then z, written into `out`, which holds that
+     * many and is all air to start with. Clears every chunk's volume flag, as
+     * a volume made from this is up to date with all of them: the window's
+     * are in it, and update_volume() would leave the others out anyway.
+     * What VoxelView::set_volume_window() builds a new volume from in one
+     * upload, rather than a GL call per chunk.
+     */
+    void copy_window(VoxelID* out, Int3 origin, Int3 size);
+
+    /**
      * The chunk at chunk coordinate `chunk_pos`, made as air if it did not
      * exist, and marked for remeshing and for its shadow volume when it is
      * new. The caller keeps to the map's bounds.

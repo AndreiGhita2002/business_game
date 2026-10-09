@@ -203,15 +203,29 @@ build_chunk_mesh_data(const VoxelChunk& chunk, const VoxelNeighbourSampler& neig
                 VoxelID v = chunk[idx(x,y,z)];
                 if (v == 0) continue; // air
 
+                // Looked up once for the voxel, and only once it has a face
+                MaterialMeshData* A = nullptr;
                 for (int f = 0; f < 6; ++f) {
                     const int nx = x + dirs[f].dx;
                     const int ny = y + dirs[f].dy;
                     const int nz = z + dirs[f].dz;
 
                     if (!solid_at(nx, ny, nz)) {
-                        MaterialMeshData& A = byMat[v];
-                        A.id = v;
-                        emitFace(A, x, y, z, f);
+                        if (A == nullptr) {
+                            A = &byMat[v];
+                            if (A->vertices.empty()) {
+                                // Room for a chunk's worth of faces up front,
+                                // rather than growing a face at a time
+                                constexpr size_t FACES = 256;
+                                A->id = v;
+                                A->vertices.reserve(FACES * 12);
+                                A->normals.reserve(FACES * 12);
+                                A->uvs.reserve(FACES * 8);
+                                A->colors.reserve(FACES * 16);
+                                A->indices.reserve(FACES * 6);
+                            }
+                        }
+                        emitFace(*A, x, y, z, f);
                     }
                 }
             }
@@ -257,6 +271,18 @@ std::vector<MaterialMesh> upload_chunk_mesh(const std::vector<MaterialMeshData>&
         }
 
         UploadMesh(&mesh, false); // static by default
+
+        // The GPU has its own copy now. Only the vertices and indices are
+        // read on the CPU again (picking, and the box round a selected grid),
+        // so the rest goes, which is over half of what a chunk keeps in RAM.
+        // UnloadMesh() skips a null array.
+        MemFree(mesh.normals);
+        MemFree(mesh.texcoords);
+        MemFree(mesh.colors);
+        mesh.normals = nullptr;
+        mesh.texcoords = nullptr;
+        mesh.colors = nullptr;
+
         result.push_back(MaterialMesh{ A.id, mesh });
     }
 
