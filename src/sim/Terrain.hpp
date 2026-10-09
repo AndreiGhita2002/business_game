@@ -50,6 +50,15 @@ struct TerrainSettings {
     // How far through the noise one block moves. The old voxel terrain moved
     // a twentieth per voxel, and a block is four of those.
     Fixed noise_scale = Fixed::from_ratio(1, 5);
+    // How many blocks a noise sample of 1 stands, which sets how tall the
+    // hills are and with them how steep: a slope is roughly hill_height *
+    // noise_scale blocks per block at its steepest. Kept apart from size_z so
+    // the world can have headroom without every slope turning into a cliff.
+    // Anything past the top of the world is cut off at size_z.
+    // 8 tops out at 6 blocks with nearly every slope a single block step; 32
+    // reached 23 blocks, but four in ten neighbouring columns were more than a
+    // block apart. Taller and still gentle wants a smaller noise_scale too.
+    int32_t hill_height = 8;
     // How many blocks of dirt sit under the grass before the stone starts
     int32_t dirt_depth = 1;
 };

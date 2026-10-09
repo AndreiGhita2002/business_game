@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <set>
 
 #include "sim/Noise.hpp"
@@ -157,6 +158,55 @@ TEST_CASE("Terrain: generated columns are stone, then dirt, then grass on top", 
     REQUIRE(types.count(BlockType::Stone) == 1);
     REQUIRE(types.count(BlockType::Dirt) == 1);
     REQUIRE(types.count(BlockType::Grass) == 1);
+}
+
+TEST_CASE("Terrain: the hill height sets how tall and how steep", "[sim][terrain]") {
+    // The tallest column, and the biggest step between two neighbours
+    const auto measure = [](const Terrain& t, int32_t* top, int32_t* step) {
+        *top = 0;
+        *step = 0;
+        for (int32_t x = 0; x < t.size_x(); ++x) {
+            for (int32_t y = 0; y < t.size_y(); ++y) {
+                const int32_t c = t.column_height(x, y);
+                *top = std::max(*top, c);
+                if (x + 1 < t.size_x()) *step = std::max(*step, std::abs(c - t.column_height(x + 1, y)));
+                if (y + 1 < t.size_y()) *step = std::max(*step, std::abs(c - t.column_height(x, y + 1)));
+            }
+        }
+    };
+
+    TerrainSettings low;
+    low.hill_height = 8;
+    TerrainSettings high;
+    high.hill_height = 32;
+    int32_t low_top = 0, low_step = 0, high_top = 0, high_step = 0;
+    measure(generate_terrain(low), &low_top, &low_step);
+    measure(generate_terrain(high), &high_top, &high_step);
+
+    // A sample stands at most hill_height blocks, and the noise stays under 1
+    REQUIRE(low_top <= low.hill_height);
+    REQUIRE(high_top <= high.hill_height);
+    // The same hills, scaled: taller and steeper together
+    REQUIRE(high_top > low_top);
+    REQUIRE(high_step > low_step);
+
+    // The height of the world is independent of it: hills taller than the
+    // world are cut off at its top rather than poking through
+    TerrainSettings capped;
+    capped.size_z = 3;
+    capped.hill_height = 64;
+    const Terrain flat_top = generate_terrain(capped);
+    int32_t capped_top = 0, capped_step = 0;
+    measure(flat_top, &capped_top, &capped_step);
+    REQUIRE(capped_top == 3);
+
+    // And a hill height of 0 is a flat world one block deep
+    TerrainSettings none;
+    none.hill_height = 0;
+    int32_t none_top = 0, none_step = 0;
+    measure(generate_terrain(none), &none_top, &none_step);
+    REQUIRE(none_top == 1);
+    REQUIRE(none_step == 0);
 }
 
 TEST_CASE("Terrain: the same settings give the same terrain", "[sim][terrain]") {

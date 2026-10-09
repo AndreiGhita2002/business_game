@@ -208,12 +208,17 @@ a 3D grid of blocks (`sim::BlockType`: air, stone, dirt, grass), x and y across,
 z up, each `BLOCK_SIZE` units on a side. It is the gameplay grid.
 
 - `generate_terrain(TerrainSettings)` takes one noise sample per column, at its
-  middle, and scales it so a sample of 1 reaches the top of the world. The top
+  middle, and scales it so a sample of 1 stands `hill_height` blocks tall,
+  cut off at the top of the world. The top
   block is grass, `dirt_depth` blocks of dirt under it, stone below that, and
   every column keeps at least its bottom block. The defaults are 32x32x32 blocks
   (128 voxels on every side) from seed 123456, the old voxel terrain's seed.
-  The noise rarely passes 0.7, so the ground tops out around 23 blocks and
-  about half the columns are a single block.
+- **Slopes:** the steepest a slope gets is roughly `hill_height *
+  noise_scale` blocks per block, so the two together set it. The default hill
+  height of 8 (with `noise_scale` 1/5) tops out at 6 blocks with about 5% of
+  neighbouring columns more than a block apart; 32 reached 23 blocks with 41%.
+  For tall and gentle, lower `noise_scale` as well (1/10 with 16: 11 blocks,
+  7%), which spreads the same landscape out.
 - `sim::PerlinNoise` is a port of `siv::PerlinNoise` (`includes/`) to `Fixed`:
   the same permutation from the same seed (it shuffles with `std::mt19937` and
   a plain modulo, both exactly specified) and the same maths, so it agrees with

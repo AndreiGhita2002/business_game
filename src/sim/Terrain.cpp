@@ -112,12 +112,11 @@ Terrain generate_terrain(const TerrainSettings& settings) {
             const Fixed sample = noise.noise2d((Fixed::from_int(x) + half) * settings.noise_scale,
                                                (Fixed::from_int(y) + half) * settings.noise_scale);
 
-            // A sample of 1 would reach the top of the world, the way the old
-            // voxel terrain scaled it to the height of its chunk. The noise
-            // rarely goes past a half either way, and everything below 0 is
-            // the lowest ground there is.
+            // A sample of 1 stands hill_height blocks tall. The noise rarely
+            // goes past a half either way, and everything below 0 is the
+            // lowest ground there is.
             const int32_t top = static_cast<int32_t>(std::clamp<int64_t>(
-                (sample * settings.size_z).floor_int(), 0, settings.size_z - 1));
+                (sample * settings.hill_height).floor_int(), 0, settings.size_z - 1));
 
             for (int32_t z = 0; z <= top; ++z) {
                 BlockType type = BlockType::Stone;
