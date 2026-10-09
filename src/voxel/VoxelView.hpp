@@ -40,7 +40,8 @@ using GridRemovalListener = std::function<void(const std::vector<VoxelGrid*>& re
 class VoxelView : public ViewNode, public GridSink {
 public:
     // Every grid that is updated and drawn. The map and the test grid made in
-    // the constructor are this view's own and are deleted with it; an entity's
+    // the constructor, and any grid the editor's "New Grid" button makes, are
+    // this view's own and are deleted with it; an entity's
     // grids belong to the entity, which hands them in and takes them back out
     // through the GridSink calls below.
     std::vector<VoxelGrid*> voxel_grids;

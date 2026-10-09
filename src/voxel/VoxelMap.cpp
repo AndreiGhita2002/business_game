@@ -40,6 +40,9 @@ VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y
     colorMap->insert(std::pair<VoxelID, Color>(9, SKYBLUE));
     colorMap->insert(std::pair<VoxelID, Color>(10, MAROON));
     colorMap->insert(std::pair<VoxelID, Color>(11, RAYWHITE));
+    // The voxel a grid made by the editor's "New Grid" button starts with, see
+    // NEW_GRID_VOXEL_ID
+    colorMap->insert(std::pair<VoxelID, Color>(12, BLACK));
 
     this->chunks = std::map<Int2, VoxelChunk>();
     for (int ix = 0; ix < chunk_count.x; ++ix) {

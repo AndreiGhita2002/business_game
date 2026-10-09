@@ -9,8 +9,11 @@
 #include <raymath.h>
 #include <rlgl.h>
 
+#include "UIButton.hpp"
 #include "UIView.hpp"
 #include "game/Picking.hpp"
+#include "game/Transform.hpp"
+#include "voxel/SingleChunkGrid.hpp"
 #include "voxel/VoxelView.hpp"
 
 // ---------------------------------------------------------------- palette cell
@@ -65,10 +68,22 @@ std::string& VoxelEditor::get_view_type() {
 VoxelEditor::VoxelEditor(ViewNode* parent, VoxelView* voxel_view)
     : UINode(parent, Rectangle{16.0f, 16.0f, 0.0f, 0.0f}, Anchor::BOTTOM_RIGHT),
       selected_id(NO_VOXEL_SELECTION), voxel_view(voxel_view), cell_count(0),
-      has_target(false), target_grid(nullptr), target_pos(Int3{}), remove_pos(Int3{}),
+      placing_new_grid(false), new_grid_button(nullptr),
+      has_target(false), target_grid(nullptr), target_model(nullptr),
+      target_pos(Int3{}), remove_pos(Int3{}),
       target_matrix(MatrixIdentity()), target_cell(Vector3{})
 {
     build_palette();
+
+    // The button sits under the table and is cut to its width
+    const float table_width =
+        static_cast<float>(palette_columns()) * (PALETTE_CELL_SIZE + PALETTE_CELL_GAP) - PALETTE_CELL_GAP;
+    const float button_y =
+        PALETTE_CELL_GAP + static_cast<float>(palette_rows()) * (PALETTE_CELL_SIZE + PALETTE_CELL_GAP);
+    auto button = std::make_unique<UIButton>(this, "New Grid", [this] { toggle_new_grid(); },
+        Rectangle{PALETTE_CELL_GAP, button_y, table_width, NEW_GRID_BUTTON_HEIGHT});
+    new_grid_button = button.get();
+    add_child(std::move(button));
 }
 
 void VoxelEditor::select(const int voxel_id) {
@@ -78,8 +93,29 @@ void VoxelEditor::select(const int voxel_id) {
     // from.
     if (voxel_id != NO_VOXEL_SELECTION && on_select) on_select();
 
+    placing_new_grid = false;
     selected_id = voxel_id;
     TraceLog(LOG_DEBUG, "[EDITOR] Selected voxel id: %d", voxel_id);
+}
+
+void VoxelEditor::toggle_new_grid() {
+    if (placing_new_grid) {
+        placing_new_grid = false;
+        TraceLog(LOG_DEBUG, "[EDITOR] New grid cancelled");
+        return;
+    }
+
+    // Arming this takes the world click, so the other tools are told just as
+    // they are when a colour is armed
+    if (on_select) on_select();
+
+    selected_id = NO_VOXEL_SELECTION;
+    placing_new_grid = true;
+    TraceLog(LOG_DEBUG, "[EDITOR] Click in the world to place a new grid");
+}
+
+bool VoxelEditor::is_active() const {
+    return selected_id != NO_VOXEL_SELECTION || placing_new_grid;
 }
 
 Rectangle VoxelEditor::cell_bounds(const int index) {
@@ -110,22 +146,33 @@ void VoxelEditor::build_palette() {
     cell_count = index + 1;
 }
 
-Vector2 VoxelEditor::measure() {
-    const int columns = cell_count < PALETTE_COLUMNS ? cell_count : PALETTE_COLUMNS;
-    const int rows = (cell_count + PALETTE_COLUMNS - 1) / PALETTE_COLUMNS;
+int VoxelEditor::palette_columns() const {
+    return cell_count < PALETTE_COLUMNS ? cell_count : PALETTE_COLUMNS;
+}
 
+int VoxelEditor::palette_rows() const {
+    return (cell_count + PALETTE_COLUMNS - 1) / PALETTE_COLUMNS;
+}
+
+Vector2 VoxelEditor::measure() {
+    // The table, then the button under it
     return Vector2{
-        static_cast<float>(columns) * (PALETTE_CELL_SIZE + PALETTE_CELL_GAP) + PALETTE_CELL_GAP,
-        static_cast<float>(rows) * (PALETTE_CELL_SIZE + PALETTE_CELL_GAP) + PALETTE_CELL_GAP,
+        static_cast<float>(palette_columns()) * (PALETTE_CELL_SIZE + PALETTE_CELL_GAP) + PALETTE_CELL_GAP,
+        static_cast<float>(palette_rows()) * (PALETTE_CELL_SIZE + PALETTE_CELL_GAP) + PALETTE_CELL_GAP
+            + NEW_GRID_BUTTON_HEIGHT + PALETTE_CELL_GAP,
     };
 }
 
 void VoxelEditor::update(const float delta_time) {
     if (!isEnabled) return;
 
+    new_grid_button->text = placing_new_grid ? "Cancel" : "New Grid";
+
     update_target();
 
-    if (has_target && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (has_target && placing_new_grid && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        place_new_grid();
+    } else if (has_target && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         if (target_grid->set_voxel(target_pos, static_cast<VoxelID>(selected_id))) {
             TraceLog(LOG_DEBUG, "[EDITOR] Placed voxel %d at %d,%d,%d",
                      selected_id, target_pos.x, target_pos.y, target_pos.z);
@@ -135,7 +182,8 @@ void VoxelEditor::update(const float delta_time) {
         }
     }
 
-    if (has_target && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+    // Nothing to clear while a new grid is waiting to be placed
+    if (has_target && !placing_new_grid && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
         //TODO (design) decide what a grid should do once its last voxel is gone.
         // An emptied grid meshes to a model with no meshes at all, so no ray can
         // ever hit it again: it is invisible and cannot be built on, but it is
@@ -161,13 +209,47 @@ void VoxelEditor::forget_grids(const std::vector<VoxelGrid*>& grids) {
     if (target_grid != nullptr && std::find(grids.begin(), grids.end(), target_grid) != grids.end()) {
         has_target = false;
         target_grid = nullptr;
+        target_model = nullptr;
     }
+}
+
+void VoxelEditor::place_new_grid() {
+    // Where the voxel goes inside the new grid: the middle of the chunk, so that
+    // there is room to build out from it in every direction
+    const Int3 start{CHUNK_SIZE / 2, CHUNK_SIZE / 2, CHUNK_SIZE / 2};
+
+    // On the map's colours, like the test grid, so the palette in this panel is
+    // the one it is meshed with
+    auto* grid = new SingleChunkGrid(voxel_view, voxel_view->game_map->voxel_colours);
+    grid->name = "new grid";
+    grid->set_voxel(start, static_cast<VoxelID>(NEW_GRID_VOXEL_ID));
+
+    // The new grid takes the frame of the model that was clicked, so that its
+    // voxels line up with that model's and the new one lands exactly on the
+    // preview cube. A SingleChunkGrid's model sits at its grid's origin, and in
+    // model space the start voxel's corner is (x, z, y) - the mesher's axes -
+    // so shifting the grid by the difference puts that corner on target_cell.
+    const Transform clicked = transform_transform(target_model->transform, target_grid->get_world_transform());
+    Transform offset = identity();
+    offset.translation = Vector3{
+        target_cell.x - static_cast<float>(start.x),
+        target_cell.y - static_cast<float>(start.z),
+        target_cell.z - static_cast<float>(start.y),
+    };
+    // No parent, so its local transform is its world one
+    grid->set_transform(transform_transform(offset, clicked));
+
+    // The view deletes it with the rest of its own grids when it goes
+    voxel_view->add_grids({grid});
+
+    placing_new_grid = false;
+    TraceLog(LOG_DEBUG, "[EDITOR] Placed a new grid");
 }
 
 void VoxelEditor::update_target() {
     has_target = false;
 
-    if (selected_id == NO_VOXEL_SELECTION) return;
+    if (!is_active()) return;
 
     // A click that lands on the palette, or on any other UI, is not a click on
     // the world. UIView has already routed the mouse by the time this runs.
@@ -196,13 +278,19 @@ void VoxelEditor::update_target() {
     const Vector3 target_point = Vector3Add(local_point, Vector3Scale(local_normal, 0.5f));
     const Vector3 remove_point = Vector3Subtract(local_point, Vector3Scale(local_normal, 0.5f));
 
+    // A new grid only needs the cell, which is free to lie outside the grid
+    // that was clicked - above the map's top layer, say - as the voxel goes in
+    // the new grid, not in this one
     Int3 grid_pos{};
     Int3 hit_pos{};
-    if (!hit.grid->model_to_grid(hit.model, target_point, &grid_pos)) return;
-    if (!hit.grid->model_to_grid(hit.model, remove_point, &hit_pos)) return;
+    if (!placing_new_grid) {
+        if (!hit.grid->model_to_grid(hit.model, target_point, &grid_pos)) return;
+        if (!hit.grid->model_to_grid(hit.model, remove_point, &hit_pos)) return;
+    }
 
     has_target = true;
     target_grid = hit.grid;
+    target_model = hit.model;
     target_pos = grid_pos;
     remove_pos = hit_pos;
     target_matrix = hit.world_matrix;

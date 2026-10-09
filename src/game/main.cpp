@@ -214,7 +214,7 @@ void global::init() {
     // A free click on a car selects it, but only when neither of those two is
     // waiting on the click for itself
     vehicle_panel->world_click_taken = [transform_menu, editor] {
-        return transform_menu->is_active() || editor->selected_id != NO_VOXEL_SELECTION;
+        return transform_menu->is_active() || editor->is_active();
     };
 
     // An entity's grids are deleted when it leaves the camera's range, and

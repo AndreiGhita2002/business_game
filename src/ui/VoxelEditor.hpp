@@ -21,7 +21,14 @@
 #define PALETTE_COLUMNS 4
 #define PALETTE_CELL_SIZE 32.0f
 #define PALETTE_CELL_GAP 4.0f
+// The "New Grid" button under the table
+#define NEW_GRID_BUTTON_HEIGHT 26.0f
 
+// The voxel a new grid starts with: black, in the map's colour map, which every
+// grid the editor makes shares
+#define NEW_GRID_VOXEL_ID 12
+
+class UIButton;
 class VoxelView;
 class VoxelEditor;
 
@@ -56,6 +63,12 @@ private:
  * outlined, and the voxel that would be placed is previewed in the world as a
  * wireframe cube.
  *
+ * The "New Grid" button under the table arms a different click: the next one
+ * in the world makes a new SingleChunkGrid holding a single black voxel, in the
+ * empty cell the click would have placed a voxel in. The grid is lined up with
+ * whatever was clicked, so it sits on the voxel grid the preview cube shows.
+ * Pressing the button again, or picking any palette cell, gives it up.
+ *
  * It is a UINode so that it is laid out by the UIView and so that clicks on the
  * palette are not also treated as clicks on the world.
  */
@@ -75,13 +88,26 @@ public:
      */
     std::function<void()> on_select;
 
+    /**
+     * True while the next click in the world is waiting on this editor: a
+     * colour is armed, or a new grid is about to be placed.
+     */
+    bool is_active() const;
+
     std::string& get_view_type() override;
 
     void update(float delta_time) override;
     void draw() override;
     Vector2 measure() override;
 
+    /** Arms a colour. Also gives up placing a new grid, whatever the id. */
     void select(int voxel_id);
+
+    /**
+     * Arms the "New Grid" click, or gives it up if it was already armed. The
+     * colour selection is cleared, as the next click places a grid instead.
+     */
+    void toggle_new_grid();
 
     /** Lets go of any of these grids, which are about to be deleted. */
     void forget_grids(const std::vector<VoxelGrid*>& grids);
@@ -94,9 +120,17 @@ private:
 
     int cell_count;
 
+    // Whether the next click makes a new grid rather than placing a colour
+    bool placing_new_grid;
+    // Owned by the child chain; kept here to change its text while armed
+    UIButton* new_grid_button;
+
     // What the next click would do, refreshed every frame
     bool has_target;
     VoxelGrid* target_grid;
+    // The model of that grid the ray landed on. Only good for the frame it was
+    // found in, which is all a new grid needs it for.
+    ModelInfo* target_model;
     // The empty voxel a left click would fill
     Int3 target_pos;
     // The solid voxel a right click would clear
@@ -110,6 +144,12 @@ private:
     void build_palette();
     // Where the cell with this index sits inside the panel
     static Rectangle cell_bounds(int index);
+    // How many rows and columns of cells the table has
+    int palette_columns() const;
+    int palette_rows() const;
+
+    // Makes the new grid in the target cell and hands it to the VoxelView
+    void place_new_grid();
 
     // Ray casts from the cursor and works out the voxel a click would place
     void update_target();
