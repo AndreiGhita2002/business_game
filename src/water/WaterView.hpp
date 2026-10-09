@@ -25,10 +25,19 @@
 #define WATER_SURFACE_INSET 0.125f
 
 // How far above and below the surface a chunk's box reaches when it is tested
-// against the camera. The mesh is flat, so this is only room for a shader that
-// moves the vertices later (waves) to do so without the culling cutting the
-// crests off at the edge of the screen.
+// against the camera: room for the waves the vertex shader makes, so the
+// culling does not cut the crests off at the edge of the screen. A wave
+// amplitude past this would start to.
 #define WATER_BOUNDS_MARGIN 0.5f
+
+// The waves' defaults. Kept under WATER_SURFACE_INSET, so a crest never
+// reaches the top of the voxel layer the water fills and fights the ground
+// there for the depth buffer.
+#define WATER_WAVE_AMPLITUDE 0.1f   // voxels, either side of the surface
+#define WATER_WAVE_LENGTH 8.0f      // voxels, crest to crest
+#define WATER_WAVE_PERIOD 3.0f      // seconds for a crest to move one wavelength
+static_assert(WATER_WAVE_AMPLITUDE < WATER_SURFACE_INSET, "a crest would reach the next voxel layer");
+static_assert(WATER_WAVE_AMPLITUDE <= WATER_BOUNDS_MARGIN, "the culling would cut crests off");
 
 /**
  * One square of the water, on the ground plane of the terrain's own space: a
@@ -62,6 +71,15 @@ float water_surface_height(int level);
  * in the terrain's own space.
  */
 BoundingBox water_chunk_bounds(const WaterChunk& chunk, float surface_y);
+
+/**
+ * How far a wave lifts the water at (x, z) in the terrain's own space, at
+ * `time` seconds: a ripple running out from the terrain's (0, 0),
+ *   amplitude * sin(2 pi r / length - 2 pi time / period)
+ * where r is the distance from that point. The C++ twin of wave_height() in
+ * resources/shaders/water.vs, which is what draws it: change the two together.
+ */
+float water_wave_height(float x, float z, float time, float amplitude, float length, float period);
 
 /**
  * The water: a flat plane at one level over the whole map, drawn with its own
@@ -99,6 +117,12 @@ public:
     // Handed to the shader as `waterColour`. The alpha is honoured.
     Color colour{40, 110, 200, 200};
 
+    // The waves, see water_wave_height(). Read every frame. Keep the amplitude
+    // under WATER_SURFACE_INSET and WATER_BOUNDS_MARGIN, as the defaults are.
+    float wave_amplitude = WATER_WAVE_AMPLITUDE;
+    float wave_length = WATER_WAVE_LENGTH;
+    float wave_period = WATER_WAVE_PERIOD;
+
     /**
      * @param camera: the camera to draw with and to cull against. Borrowed, so
      *        it has to outlive the view (it is the VoxelView's).
@@ -118,6 +142,7 @@ public:
     WaterView& operator=(const WaterView&) = delete;
 
     std::string& get_view_type() override;
+    void update(float delta_time) override;
     void render() override;
 
     size_t chunk_count() const { return chunks.size(); }
@@ -143,6 +168,18 @@ private:
     Material material{};
 
     int colour_loc{-1};
+    int chunk_rect_loc{-1};
+    int wave_time_loc{-1};
+    int wave_amplitude_loc{-1};
+    int wave_number_loc{-1};
+    int wave_speed_loc{-1};
+
+    // Frame time, not game time: the waves are cosmetic and keep moving while
+    // the simulation is paused. Wrapped round once a wave period, which
+    // changes nothing on screen and keeps the shader's sine accurate however
+    // long the game runs.
+    float wave_time{0.0f};
+
     size_t visible_last_frame{0};
 };
 

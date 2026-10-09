@@ -98,6 +98,57 @@ TEST_CASE("a camera over one corner of the map keeps only the chunks near it", "
     REQUIRE(visible < 8);
 }
 
+// The waves, through water_wave_height(), the C++ twin of the vertex shader's
+// wave_height(). A 0.1 high, 8 long wave that takes 2 seconds to move along by
+// a wavelength.
+namespace {
+constexpr float AMP = 0.1f;
+constexpr float LEN = 8.0f;
+constexpr float PERIOD = 2.0f;
+float wave(const float x, const float z, const float t) {
+    return water_wave_height(x, z, t, AMP, LEN, PERIOD);
+}
+}
+
+TEST_CASE("the wave stays within its amplitude", "[water][waves]") {
+    for (int i = 0; i < 200; ++i) {
+        const float h = wave(static_cast<float>(i) * 0.37f, static_cast<float>(i) * -0.21f, i * 0.05f);
+        REQUIRE(h <= AMP + test::EPS);
+        REQUIRE(h >= -AMP - test::EPS);
+    }
+}
+
+TEST_CASE("the wave peaks a quarter wavelength out at time 0", "[water][waves]") {
+    REQUIRE(wave(0.0f, 0.0f, 0.0f) == Approx(0.0f).margin(test::EPS));
+    REQUIRE(wave(LEN / 4.0f, 0.0f, 0.0f) == Approx(AMP));
+    REQUIRE(wave(3.0f * LEN / 4.0f, 0.0f, 0.0f) == Approx(-AMP));
+}
+
+TEST_CASE("the wave depends only on the distance from the origin", "[water][waves]") {
+    // Five units out along x, along z, and on a diagonal (3, 4)
+    const float along_x = wave(5.0f, 0.0f, 0.7f);
+    REQUIRE(wave(0.0f, 5.0f, 0.7f) == Approx(along_x));
+    REQUIRE(wave(-5.0f, 0.0f, 0.7f) == Approx(along_x));
+    REQUIRE(wave(3.0f, 4.0f, 0.7f) == Approx(along_x));
+}
+
+TEST_CASE("the wave repeats every period and every wavelength", "[water][waves]") {
+    REQUIRE(wave(3.0f, 1.0f, 0.4f + PERIOD) == Approx(wave(3.0f, 1.0f, 0.4f)).margin(test::EPS));
+    REQUIRE(wave(3.0f + LEN, 0.0f, 0.4f) == Approx(wave(3.0f, 0.0f, 0.4f)).margin(test::EPS));
+}
+
+TEST_CASE("the crests run outwards", "[water][waves]") {
+    // A crest moves a wavelength per period, so half a second later the same
+    // height is found a quarter of a wavelength further out
+    const float now = wave(2.0f, 0.0f, 0.3f);
+    REQUIRE(wave(2.0f + LEN / 4.0f, 0.0f, 0.3f + PERIOD / 4.0f) == Approx(now).margin(test::EPS));
+}
+
+TEST_CASE("a wave with no length or period is still water", "[water][waves]") {
+    REQUIRE(water_wave_height(2.0f, 0.0f, 0.5f, AMP, 0.0f, PERIOD) == 0.0f);
+    REQUIRE(water_wave_height(2.0f, 0.0f, 0.5f, AMP, LEN, 0.0f) == 0.0f);
+}
+
 TEST_CASE("a chunk sits where it is laid out when the terrain is at the origin", "[water]") {
     const WaterChunk chunk{32.0f, 16.0f, 16.0f, 16.0f};
     const Matrix m = WaterView::chunk_matrix(chunk, 1.875f, MatrixIdentity());

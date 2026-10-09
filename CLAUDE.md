@@ -110,7 +110,9 @@ The game side:
 - `test_frustum.cpp` - `game/Frustum`: boxes kept and thrown away against a
   camera built the way `BeginMode3D()` builds one.
 - `test_water.cpp` - how the water is cut into chunks, where its surface sits,
-  and which chunks a camera over one corner keeps. The `WaterView` itself needs
+  which chunks a camera over one corner keeps, the chunks following the
+  terrain's transform, and the waves through `water_wave_height()`, the twin
+  of the vertex shader's. The `WaterView` itself needs
   a GL context and is never built.
 - `test_terrain_voxels.cpp` - `entity/TerrainVoxels`: each block type's voxels,
   a terrain drawn into a `VoxelMap`, and `sim::PerlinNoise` checked against
@@ -576,11 +578,23 @@ and saved in `CORE`. Nothing in the simulation reads it yet.
   The boxes reach `WATER_BOUNDS_MARGIN` above and below the surface, room for
   displaced waves later. `visible_chunk_count()` says how many passed.
 - Its own shader, `resources/shaders/water.vs/.fs`, loaded with `LoadShader()`
-  (no patching). For now the fragment half outputs `waterColour`
-  (`WaterView::colour`, alpha honoured, slightly translucent by default). The
-  vertex half already passes world position, normal and texcoord on for when
-  it does more. Back face culling is off while it draws, as the camera can go
-  under the plane.
+  (no patching). The fragment half outputs `waterColour` (`WaterView::colour`,
+  alpha honoured, slightly translucent by default). Back face culling is off
+  while it draws, as the camera can go under the plane.
+- **Waves** are made in the vertex half: each vertex is lifted by
+  `amplitude * sin(2 pi r / length - 2 pi t / period)`, `r` its distance from
+  the terrain's (0, 0), so ripples run outwards from that corner and move with
+  the terrain. Per draw the shader gets `chunkRect` (the chunk's centre and
+  scale) to turn a mesh vertex back into a terrain position; per frame
+  `waveTime`, `waveAmplitude`, `waveNumber` and `waveSpeed`. It also works out
+  the slope for `fragNormal`, unused until the fragment half lights anything.
+  `water_wave_height()` in `WaterView.cpp` is the C++ twin the tests cover -
+  **change the two together**. The time is frame time, so the waves keep
+  moving while the game is paused, wrapped once a period so the sine never
+  loses precision. `wave_amplitude` / `wave_length` / `wave_period` on the view
+  default to 0.1, 8 and 3 s; the amplitude is static_asserted under
+  `WATER_SURFACE_INSET` (a crest never reaches the next voxel layer) and
+  `WATER_BOUNDS_MARGIN` (the culling never clips a crest).
 - The shader is owned by the material: `UnloadMaterial()` in the destructor
   unloads it, while the window is still open (the view tree goes before it).
 

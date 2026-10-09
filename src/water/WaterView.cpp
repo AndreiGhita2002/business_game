@@ -5,6 +5,7 @@
 #include "WaterView.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <raymath.h>
 #include <rlgl.h>
 
@@ -39,6 +40,13 @@ BoundingBox water_chunk_bounds(const WaterChunk& chunk, const float surface_y) {
     };
 }
 
+float water_wave_height(const float x, const float z, const float time,
+                        const float amplitude, const float length, const float period) {
+    if (length <= 0.0f || period <= 0.0f) return 0.0f;
+    const float r = std::sqrt(x * x + z * z);
+    return amplitude * std::sin(2.0f * PI * r / length - 2.0f * PI * time / period);
+}
+
 WaterView::WaterView(ViewNode* parent, const raylib::Camera* camera, const int size_x, const int size_z,
                      const std::string& shader_path)
     : ViewNode(parent), camera(camera),
@@ -54,6 +62,11 @@ WaterView::WaterView(ViewNode* parent, const raylib::Camera* camera, const int s
     material = LoadMaterialDefault();
     material.shader = LoadShader(vertex_path.c_str(), fragment_path.c_str());
     colour_loc = GetShaderLocation(material.shader, "waterColour");
+    chunk_rect_loc = GetShaderLocation(material.shader, "chunkRect");
+    wave_time_loc = GetShaderLocation(material.shader, "waveTime");
+    wave_amplitude_loc = GetShaderLocation(material.shader, "waveAmplitude");
+    wave_number_loc = GetShaderLocation(material.shader, "waveNumber");
+    wave_speed_loc = GetShaderLocation(material.shader, "waveSpeed");
 }
 
 WaterView::~WaterView() {
@@ -65,6 +78,14 @@ WaterView::~WaterView() {
 std::string& WaterView::get_view_type() {
     static std::string TYPE = WATER_VIEW_STR;
     return TYPE;
+}
+
+void WaterView::update(const float delta_time) {
+    wave_time += delta_time;
+    if (wave_period > 0.0f) wave_time = std::fmod(wave_time, wave_period);
+
+    // On to the siblings, the UIView among them
+    ViewNode::update(delta_time);
 }
 
 Matrix WaterView::chunk_matrix(const WaterChunk& chunk, const float surface_y, const Matrix terrain) {
@@ -84,6 +105,17 @@ void WaterView::render() {
     const Vector4 colour_normalised = ColorNormalize(colour);
     SetShaderValue(material.shader, colour_loc, &colour_normalised, SHADER_UNIFORM_VEC4);
 
+    // The shader takes the wave as a wave number and an angular speed, which
+    // saves it a division per vertex. A length or period of 0 stills the water.
+    const bool waves_on = wave_length > 0.0f && wave_period > 0.0f;
+    const float wave_number = waves_on ? 2.0f * PI / wave_length : 0.0f;
+    const float wave_speed = waves_on ? 2.0f * PI / wave_period : 0.0f;
+    const float amplitude = waves_on ? wave_amplitude : 0.0f;
+    SetShaderValue(material.shader, wave_time_loc, &wave_time, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(material.shader, wave_amplitude_loc, &amplitude, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(material.shader, wave_number_loc, &wave_number, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(material.shader, wave_speed_loc, &wave_speed, SHADER_UNIFORM_FLOAT);
+
     BeginMode3D(*camera); {
         // Taken from rlgl rather than worked out from the camera again, so the
         // culling always agrees with the projection BeginMode3D() set up. The
@@ -99,6 +131,14 @@ void WaterView::render() {
         size_t visible = 0;
         for (const WaterChunk& chunk : chunks) {
             if (!frustum_contains_box(frustum, water_chunk_bounds(chunk, surface_y))) continue;
+
+            // The same placement chunk_matrix() makes, as numbers, so the
+            // shader can find each vertex on the terrain for its wave
+            const Vector4 rect = {
+                chunk.x + chunk.width * 0.5f, chunk.z + chunk.depth * 0.5f,
+                chunk.width / WATER_CHUNK_SIZE, chunk.depth / WATER_CHUNK_SIZE,
+            };
+            SetShaderValue(material.shader, chunk_rect_loc, &rect, SHADER_UNIFORM_VEC4);
             DrawMesh(chunk_mesh, material, chunk_matrix(chunk, surface_y, terrain));
             visible++;
         }
