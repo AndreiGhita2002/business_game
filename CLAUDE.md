@@ -805,8 +805,10 @@ x/y" rows set the size it uses. A readout under the title shows the world's
 seed, shape, elevation and biome ("loaded game" after a load, as the seed is
 not saved), and for a few seconds how a save or a load went.
 
-`init()` sets raylib's log level to `LOG_LEVEL` (`LOG_WARNING`) before the
-window opens: raylib logs every mesh it uploads to or frees from VRAM at
+`init()` sets raylib's log level to `LOG_LEVEL` (`LOG_WARNING`) as the window
+opens, through `raylib::Window::Init()`'s last argument - that call sets the
+level itself (to `LOG_ALL` by default), so a `SetTraceLogLevel()` before it is
+undone. raylib logs every mesh it uploads to or frees from VRAM at
 `LOG_INFO`, which thousands of chunks turn into a flood. The game's own
 `LOG_INFO` and `LOG_DEBUG` messages are silenced with it; lower `LOG_LEVEL`
 to see them.

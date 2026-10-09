@@ -60,7 +60,7 @@ constexpr int QUICKSAVE_KEY = KEY_F5;
 constexpr int QUICKLOAD_KEY = KEY_F9;
 
 // The least serious log message printed, see init()
-constexpr int LOG_LEVEL = LOG_WARNING;
+constexpr TraceLogLevel LOG_LEVEL = LOG_WARNING;
 
 // How long a status line stays in the readout, in seconds
 constexpr float STATUS_SECONDS = 3.0f;
@@ -79,15 +79,16 @@ static uint32_t fresh_seed();
 static std::string world_description;
 
 void global::init() {
+    SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
     // Warnings and errors only. raylib logs every mesh it uploads to or frees
     // from VRAM at LOG_INFO, which a map of thousands of chunks turns into a
     // flood, along with its start-up report on the GL context and every shader
-    // and texture. The game's own routine messages go with them; set this
+    // and texture. The game's own routine messages go with them; set LOG_LEVEL
     // lower to see everything again.
-    SetTraceLogLevel(LOG_LEVEL);
-
-    SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
-    raylib::Window::Init(1600, 900, "business game");
+    // It has to go through Init(): raylib-cpp's Init() sets the log level
+    // itself, to LOG_ALL unless told otherwise, so a SetTraceLogLevel() before
+    // it is undone. A flags argument of 0 leaves the MSAA flag above alone.
+    raylib::Window::Init(1600, 900, "business game", 0, LOG_LEVEL);
 
     // Escape is a tool's "give up on this selection" key - the attachment menu
     // and the grid transform menu both offer it - so it cannot also be the one
