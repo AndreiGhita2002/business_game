@@ -52,6 +52,7 @@ std::optional<RoutePose> Simulation::vehicle_pose(const VehicleId id) const {
 void Simulation::write_state(ByteWriter& out) const {
     out.write_u64(world.tick);
     world.rng.write(out);
+    out.write_i32(world.water_level);
     world.routes.write(out);
     world.vehicles.write(out);
 }
@@ -71,6 +72,7 @@ const char* reject_reason_name(const RejectReason reason) {
         case RejectReason::InvalidAsset: return "invalid asset";
         case RejectReason::WrongTick: return "wrong tick";
         case RejectReason::NoCommand: return "no command";
+        case RejectReason::InvalidWaterLevel: return "invalid water level";
     }
     return "?";
 }

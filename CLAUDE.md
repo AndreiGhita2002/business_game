@@ -102,6 +102,11 @@ The game side:
 - `test_voxel_ray.cpp` - `voxel_ray_blocked()`, the voxel walk a shadow ray
   does, which is the testable twin of the one in `lighting.fs`, plus the boxes
   that decide which grids a draw call is traced against.
+- `test_frustum.cpp` - `game/Frustum`: boxes kept and thrown away against a
+  camera built the way `BeginMode3D()` builds one.
+- `test_water.cpp` - how the water is cut into chunks, where its surface sits,
+  and which chunks a camera over one corner keeps. The `WaterView` itself needs
+  a GL context and is never built.
 - `TestHelpers.hpp` - a palette, a self-deleting temp directory, and the
   `REQUIRE_VEC3_EQ` / `REQUIRE_QUAT_EQ` / `REQUIRE_TRANSFORM_EQ` comparisons.
   Include it **first** in a test file: `raymath.h` redefines raylib's vector
@@ -112,7 +117,7 @@ Grids in tests are built with a null `VoxelView`. That is only safe because
 `update_models()` is the one thing that dereferences it, and it is also the only
 call that needs an OpenGL context, so **tests must never call `update_models()`**.
 Anything that meshes, draws or reads input is out of reach and is not covered:
-`VoxelMesher`, `VoxelView`, `Light`, and all of `src/ui`.
+`VoxelMesher`, `VoxelView`, `WaterView`, `Light`, and all of `src/ui`.
 
 ## Architecture
 
@@ -139,7 +144,8 @@ Rules the simulation keeps, and that anything added to it must keep:
   container. Randomness comes from the seeded `sim::Rng` (PCG32, hand written
   because the std distributions differ between standard libraries).
 - **Every change is a command.** `sim::Command` is a class per action
-  (`AddRoute`, `SpawnVehicle`, `DespawnVehicle`, `SetVehicleSpeed`) with
+  (`AddRoute`, `SpawnVehicle`, `DespawnVehicle`, `SetVehicleSpeed`,
+  `SetWaterLevel`) with
   `apply(World&)`, `write_payload()` and `clone()`. A new one also needs a
   `CommandType` number (the wire format, so never reused) and a case in
   `read_payload()` in `Command.cpp`. `World` is the mutable state and only a
@@ -162,7 +168,7 @@ the simulation after a load.
 
 - A 12 byte header (`BGSV`, `SAVE_FORMAT_VERSION`, section count), then one
   section per system: `u32 tag, u32 version, u32 payload_bytes, payload`. The
-  sections are `CORE` (tick and Rng), `ROUT`, `VEHI` and `CMDS` (the
+  sections are `CORE` (tick, Rng and water level, version 2), `ROUT`, `VEHI` and `CMDS` (the
   `CommandQueue`: waiting commands and the next sequence number, so they run on
   the first tick after the load).
 - **No migration.** A section of another version, an unknown section, a
@@ -469,6 +475,54 @@ asks for. It is per grid, so a vehicle does not darken the ground it stands on -
 its sun shadow does that, and the soft contact patch would need either a
 per-pixel AO from the volumes or a blob under the vehicle.
 
+### Water
+
+`src/water/WaterView.cpp/hpp` - a flat plane over the whole map at one level,
+deliberately **not** part of the voxel system: it is not a grid, not meshed
+from voxels, not in the shadow volumes and casts no shadow, and no voxel code
+knows it exists. `main.cpp` is the one place the two meet (the map's size, the
+VoxelView's camera and the map's world matrix are handed in).
+
+The **level is the simulation's**: `sim::World::water_level`, an `int32_t`
+voxel layer (`DEFAULT_WATER_LEVEL` 1, never below `MIN_WATER_LEVEL` 0), changed
+only by the `SetWaterLevel` command, in `write_state()` and so in the checksum,
+and saved in `CORE`. Nothing in the simulation reads it yet.
+
+- A `ViewNode`, a sibling of the VoxelView placed right after it and before the
+  UIView. It opens its own `BeginMode3D()` with the VoxelView's camera, which
+  only works drawn after the voxels: their depth is still in the buffer, which
+  is what hides water behind a hill, and anything see-through goes last.
+- The view reads the level through `level_source` (set in `main.cpp` to the
+  simulation's) every frame, and the surface is at `level + 1 -
+  WATER_SURFACE_INSET` in the terrain's Y. The inset keeps it out of the plane
+  of a column whose ground top is at the same height, which would z-fight.
+- **Attached to the terrain.** The chunks are laid out in the map's own model
+  space (X = grid x, Y = grid z, Z = grid y, the mesher's space) and drawn
+  through `terrain_matrix`, which `main.cpp` sets to
+  `transform_to_matrix(game_map->get_world_transform())` - the same matrix the
+  map's chunks are drawn through in `voxel_model_matrix()`. Moving, turning or
+  scaling the map carries the water with it. `WaterView::chunk_matrix()` is the
+  testable half.
+- Cut into `WATER_CHUNK_SIZE` (16) squares by `water_chunk_layout()`. They are
+  all the same square, so there is **one shared mesh** (`GenMeshPlane`, a quad
+  per unit so a wave shader has vertices to move) drawn once per chunk with
+  that chunk's matrix; edge chunks that are cut short are drawn scaled down.
+- Only chunks inside the camera's frustum are drawn: `game/Frustum` extracts
+  the planes from terrain x `rlGetMatrixModelview()` x `rlGetMatrixProjection()`
+  inside the 3D block, so the culling always agrees with what `BeginMode3D()`
+  set up, and the planes come out in the terrain's space, where the chunk boxes
+  already are.
+  The boxes reach `WATER_BOUNDS_MARGIN` above and below the surface, room for
+  displaced waves later. `visible_chunk_count()` says how many passed.
+- Its own shader, `resources/shaders/water.vs/.fs`, loaded with `LoadShader()`
+  (no patching). For now the fragment half outputs `waterColour`
+  (`WaterView::colour`, alpha honoured, slightly translucent by default). The
+  vertex half already passes world position, normal and texcoord on for when
+  it does more. Back face culling is off while it draws, as the camera can go
+  under the plane.
+- The shader is owned by the material: `UnloadMaterial()` in the destructor
+  unloads it, while the window is still open (the view tree goes before it).
+
 ### UI System
 
 Hand-rolled retained-mode UI in `src/ui`:
@@ -485,12 +539,26 @@ Hand-rolled retained-mode UI in `src/ui`:
 - **UINumberRow** (`src/ui/UINumberRow.cpp/hpp`) - `label [-] value [+]`. Holds a
   `float*` to a number owned elsewhere, plus its own step, so one row can drive a
   shader uniform, a light setting, or anything else in place.
-- **ShaderMenu** (`src/ui/ShaderMenu.cpp/hpp`) - Debug panel, top left, hidden
-  until F3 or its own button. One UINumberRow per tunable: the ambient level,
+- **SettingsPanel** (`src/ui/SettingsPanel.cpp/hpp`) - The base of both
+  settings menus: a column of UINumberRows on a plate, a toggle key passed to
+  its constructor, and `visible` (kept apart from `isEnabled`, see Working
+  Guidelines). `add_value_row()` edits a `float*` in place. `add_int_row()`
+  takes a getter and a setter instead, for a value the panel cannot write
+  directly: the row edits a float of the panel's own, hands the rounded value
+  to the setter on every change, and follows the getter only when what it
+  returns changes - so a value set by a command, which lands a tick later, does
+  not flick back in between, and a loaded game still shows.
+- **ShaderMenu** (`src/ui/ShaderMenu.cpp/hpp`) - A SettingsPanel, top left,
+  hidden until F3 or its own button. One row per tunable: the ambient level,
   how much ambient occlusion comes off direct light, and the shadow step view,
-  all shader uniforms it owns the starting values for.
-  `add_value_row()` hangs non-uniform values off the same panel, which is how
-  the sun's elevation and azimuth rows are added in `main.cpp`.
+  all shader uniforms it owns the starting values for. `main.cpp` adds the
+  sun's elevation and azimuth rows to it.
+- **GameSettingsMenu** (`src/ui/GameSettingsMenu.cpp/hpp`) - A SettingsPanel
+  for the world's settings, hidden until F4 or its "Game Settings" button,
+  which sits one shader panel's width to the right of "Shader Menu" so both
+  panels can be open at once. It has no rows of its own; `main.cpp` adds them.
+  The first is the water level (0 to `CHUNK_SIZE - 1`), which reads
+  `simulation->water_level()` and submits `SetWaterLevel`.
 
 The sun's keybind (U) is mirrored by a button in the bottom left, and its angle
 in the sky by the shader menu rows; both write the same light. The camera
@@ -577,7 +645,7 @@ drawn.
 
 Shutdown order matters: scripts, then entities (their grids are still in the
 VoxelView, which takes them back), then the shader, the view tree - whose
-VoxelView deletes the grids it still holds, which by then are only its own map
+WaterView frees its mesh and shader, and whose VoxelView deletes the grids it still holds, which by then are only its own map
 and test grid - and then the simulation.
 
 `global::shutdown()` unloads the voxel shader and then clears its `locs` and

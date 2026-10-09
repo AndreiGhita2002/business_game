@@ -206,6 +206,31 @@ TEST_CASE("Save: what is not a save is refused with a reason", "[sim][save]") {
     REQUIRE_FALSE(error.empty());
 }
 
+TEST_CASE("Save: the water level is saved", "[sim][save][water]") {
+    Game game;
+    game.queue.submit(std::make_unique<SetWaterLevel>(6));
+    game.tick();
+    REQUIRE(game.sim.water_level() == 6);
+
+    const auto loaded = read_save(save_bytes(game));
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded->simulation.water_level() == 6);
+    REQUIRE(loaded->simulation.checksum() == game.sim.checksum());
+}
+
+TEST_CASE("Save: a water level below the world is refused", "[sim][save][water]") {
+    std::vector<uint8_t> bad = save_bytes(Game{});
+
+    // The water level is the last thing in CORE, the first section
+    uint32_t core_length = 0;
+    for (int i = 0; i < 4; ++i) core_length |= static_cast<uint32_t>(bad[FIRST_SECTION + 8 + i]) << (8 * i);
+    poke_u32(bad, FIRST_SECTION + 12 + core_length - 4, static_cast<uint32_t>(MIN_WATER_LEVEL - 1));
+
+    std::string error;
+    REQUIRE_FALSE(read_save(bad, &error).has_value());
+    REQUIRE(error.find("CORE") != std::string::npos);
+}
+
 TEST_CASE("Save: a section duplicated is refused", "[sim][save]") {
     const Simulation sim(1);
     const CommandQueue queue;

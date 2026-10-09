@@ -29,6 +29,7 @@ public:
     void write_u32(uint32_t v) { write_le(v, 4); }
     void write_u64(uint64_t v) { write_le(v, 8); }
     void write_i8(int8_t v) { write_u8(static_cast<uint8_t>(v)); }
+    void write_i32(int32_t v) { write_u32(static_cast<uint32_t>(v)); }
     void write_i64(int64_t v) { write_u64(static_cast<uint64_t>(v)); }
     void write_fixed(Fixed v) { write_i64(v.raw); }
 
@@ -68,6 +69,13 @@ public:
         uint8_t v = 0;
         if (!read_u8(&v)) return false;
         *out = static_cast<int8_t>(v);
+        return true;
+    }
+
+    bool read_i32(int32_t* out) {
+        uint32_t v = 0;
+        if (!read_u32(&v)) return false;
+        *out = static_cast<int32_t>(v);
         return true;
     }
 

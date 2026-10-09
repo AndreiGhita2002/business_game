@@ -19,7 +19,9 @@
 #include "ui/UILabel.hpp"
 #include "ui/UIButton.hpp"
 #include "ui/UIImage.hpp"
+#include "ui/GameSettingsMenu.hpp"
 #include "ui/ShaderMenu.hpp"
+#include "ui/UINumberRow.hpp"
 #include "ui/GridTransformMenu.hpp"
 #include "ui/VehiclePanel.hpp"
 
@@ -95,6 +97,23 @@ void global::init() {
     root_view->add_child(std::make_unique<VoxelView>(root_view.get(), &voxel_shader));
     voxel_view = static_cast<VoxelView *>(root_view->child.get());
 
+    // Water over the whole map. A sibling of the VoxelView, after it, as it
+    // needs the voxels' depth in the buffer to be hidden behind the terrain,
+    // and before the UI, which goes on top of both.
+    const Int2 map_size = voxel_view->game_map->get_size();
+    auto water_node = std::make_unique<WaterView>(root_view.get(), &voxel_view->camera,
+        map_size.x, map_size.y, "../resources/shaders/water");
+    water_view = water_node.get();
+    // Its level is the simulation's, read through the global rather than a
+    // captured pointer so a loaded game (assigned into it) is read too
+    water_view->level_source = [] { return static_cast<int>(simulation->water_level()); };
+    // Drawn through the same world matrix as the map's chunks, so the two stay
+    // together wherever the map is put (see voxel_model_matrix())
+    water_view->terrain_matrix = [] {
+        return transform_to_matrix(voxel_view->game_map->get_world_transform());
+    };
+    root_view->add_child(std::move(water_node));
+
     // The simulation's vehicles, made visible. Every asset is put on the map's
     // colours, and the placeholder cars come in three of them.
     assets = std::make_unique<AssetRegistry>(voxel_view->game_map->voxel_colours);
@@ -164,6 +183,28 @@ void global::init() {
     ui_view->add_child(std::make_unique<UIButton>(ui_view, "Shader Menu",
         [shader_menu] { shader_menu->visible = !shader_menu->visible; },
         Rectangle{UI_MARGIN, UI_MARGIN, 0.0f, UI_BUTTON_HEIGHT}, Anchor::TOP_LEFT));
+
+    // The game's settings, hidden until F4 or its button. Its button and panel
+    // sit one shader menu panel's width to the right of the shader menu, so the
+    // two panels can be open at once without covering each other.
+    const float settings_x = UI_MARGIN + UINumberRow::row_size().x + 2.0f * NUMBER_ROW_GAP + UI_BUTTON_GAP;
+    auto settings_menu_node = std::make_unique<GameSettingsMenu>(ui_view);
+    auto settings_menu = settings_menu_node.get();
+    settings_menu->bounds = Rectangle{settings_x, UI_MARGIN + UI_BUTTON_HEIGHT + UI_BUTTON_GAP, 0.0f, 0.0f};
+
+    // The highest voxel layer the water fills, up to the tallest the terrain
+    // goes. It is the simulation's, so the row reads it from there and changes
+    // it with a command, which lands on the next tick.
+    settings_menu->add_int_row("water level",
+        [] { return static_cast<int>(simulation->water_level()); },
+        [](const int level) { commands.submit(std::make_unique<sim::SetWaterLevel>(level)); },
+        1, sim::MIN_WATER_LEVEL, CHUNK_SIZE - 1);
+
+    ui_view->add_child(std::move(settings_menu_node));
+
+    ui_view->add_child(std::make_unique<UIButton>(ui_view, "Game Settings",
+        [settings_menu] { settings_menu->visible = !settings_menu->visible; },
+        Rectangle{settings_x, UI_MARGIN, 0.0f, UI_BUTTON_HEIGHT}, Anchor::TOP_LEFT));
 
     // A button for everything that used to be on a key only. The keys still
     // work: see VoxelView::updateLights. Buttons stack upwards from the bottom
@@ -275,6 +316,7 @@ void global::shutdown() {
     // on the GPU (UI textures, meshes) is released while the context is alive.
     root_view.reset();
     voxel_view = nullptr;
+    water_view = nullptr;
 
     assets.reset();
     simulation.reset();

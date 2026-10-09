@@ -25,6 +25,14 @@ namespace sim {
 constexpr int TICKS_PER_SECOND = 20;
 
 /**
+ * The water level a new game starts with, and the lowest one there can be.
+ * A level is a voxel layer: the water fills layers 0 to the level, one layer
+ * per unit of z. 0 is the lowest because layer 0 is the bottom of the world.
+ */
+constexpr int32_t DEFAULT_WATER_LEVEL = 1;
+constexpr int32_t MIN_WATER_LEVEL = 0;
+
+/**
  * Everything the simulation is, as something that can be changed. Only a
  * Command ever holds one of these, inside Simulation::step(): from outside,
  * the state is reachable through Simulation's const accessors and nothing
@@ -36,6 +44,10 @@ public:
     Rng rng;
     Routes routes;
     Vehicles vehicles;
+    // The highest voxel layer the sea fills. Nothing in the simulation reads
+    // it yet; it is here so that changing it is a command like any other, is
+    // saved, and is the same on every machine.
+    int32_t water_level = DEFAULT_WATER_LEVEL;
 
     void emit(Event event) { events.push_back(std::move(event)); }
 
@@ -78,6 +90,7 @@ public:
 
     const Routes& routes() const { return world.routes; }
     const Vehicles& vehicles() const { return world.vehicles; }
+    int32_t water_level() const { return world.water_level; }
 
     /** Where a vehicle is, or nothing when it does not exist. */
     std::optional<RoutePose> vehicle_pose(VehicleId id) const;

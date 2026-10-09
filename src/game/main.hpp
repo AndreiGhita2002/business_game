@@ -18,6 +18,7 @@
 #include "ui/VoxelEditor.hpp"
 #include "voxel/VoxelView.hpp"
 #include "voxel/VoxelMap.hpp"
+#include "water/WaterView.hpp"
 #include "sim/Command.hpp"
 #include "sim/Save.hpp"
 #include "sim/Simulation.hpp"
@@ -32,6 +33,8 @@ namespace global {
     inline std::unique_ptr<ViewNode> root_view;
     // The view the scene is drawn by, owned by root_view's child chain
     inline VoxelView* voxel_view = nullptr;
+    // The water over the map, also owned by root_view's child chain
+    inline WaterView* water_view = nullptr;
 
     // --- Simulation ---
     // The game's state. Read through its const accessors, changed only by

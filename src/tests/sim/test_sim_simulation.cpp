@@ -213,3 +213,53 @@ TEST_CASE("CommandQueue: stamps on take and empties", "[sim][commands]") {
     REQUIRE(taken[0].sequence == a);
     REQUIRE(queue.take(8).empty());
 }
+
+TEST_CASE("Simulation: the water starts at the default level", "[sim][simulation][water]") {
+    const Simulation sim(1);
+    REQUIRE(sim.water_level() == DEFAULT_WATER_LEVEL);
+}
+
+TEST_CASE("Simulation: SetWaterLevel moves the water", "[sim][simulation][water]") {
+    Simulation sim(1);
+    CommandQueue queue;
+
+    step_with(sim, queue, std::make_unique<SetWaterLevel>(5));
+    REQUIRE(sim.water_level() == 5);
+    REQUIRE(events_of<CommandRejected>(sim).empty());
+
+    // Down to the bottom of the world is allowed
+    step_with(sim, queue, std::make_unique<SetWaterLevel>(MIN_WATER_LEVEL));
+    REQUIRE(sim.water_level() == MIN_WATER_LEVEL);
+}
+
+TEST_CASE("Simulation: a water level below the world is refused", "[sim][simulation][water]") {
+    Simulation sim(1);
+    CommandQueue queue;
+
+    step_with(sim, queue, std::make_unique<SetWaterLevel>(MIN_WATER_LEVEL - 1));
+    REQUIRE(sim.water_level() == DEFAULT_WATER_LEVEL);
+    const auto rejected = events_of<CommandRejected>(sim);
+    REQUIRE(rejected.size() == 1);
+    REQUIRE(rejected[0].reason == RejectReason::InvalidWaterLevel);
+}
+
+TEST_CASE("Simulation: SetWaterLevel survives being written to bytes", "[sim][simulation][water]") {
+    StampedCommand c{3, 0, 0, std::make_unique<SetWaterLevel>(-7)};
+    ByteWriter out;
+    write_command(out, c);
+
+    ByteReader in(out.data());
+    const std::optional<StampedCommand> back = read_command(in);
+    REQUIRE(back.has_value());
+    REQUIRE(back->command->type() == CommandType::SetWaterLevel);
+    REQUIRE(static_cast<const SetWaterLevel&>(*back->command).level == -7);
+}
+
+TEST_CASE("Simulation: the checksum notices the water level", "[sim][simulation][water]") {
+    Simulation a(1), b(1);
+    CommandQueue queue;
+    step_with(a, queue, std::make_unique<SetWaterLevel>(DEFAULT_WATER_LEVEL + 1));
+    b.step({});
+    REQUIRE(a.tick() == b.tick());
+    REQUIRE(a.checksum() != b.checksum());
+}

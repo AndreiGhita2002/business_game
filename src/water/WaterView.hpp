@@ -1,0 +1,149 @@
+//
+// Created by Claude on 09.10.2026.
+//
+
+#ifndef BUSINESS_GAME_WATERVIEW_HPP
+#define BUSINESS_GAME_WATERVIEW_HPP
+#include <Camera3D.hpp>
+#include <functional>
+#include <raylib.h>
+#include <string>
+#include <vector>
+
+#include "game/ViewNode.hpp"
+
+#define WATER_VIEW_STR "WaterView"
+
+// How many units a side of a water chunk is, in the terrain's own space (one
+// per voxel). Matches the voxel map's chunks, which is a convenience rather
+// than a requirement: nothing here knows about the map's chunks.
+#define WATER_CHUNK_SIZE 16
+
+// How far below the top of its voxel layer the water's surface sits, so that
+// it is never in the same plane as the top of a column whose ground is at the
+// water level, which would flicker as the two fought over the depth buffer.
+#define WATER_SURFACE_INSET 0.125f
+
+// How far above and below the surface a chunk's box reaches when it is tested
+// against the camera. The mesh is flat, so this is only room for a shader that
+// moves the vertices later (waves) to do so without the culling cutting the
+// crests off at the edge of the screen.
+#define WATER_BOUNDS_MARGIN 0.5f
+
+/**
+ * One square of the water, on the ground plane of the terrain's own space: a
+ * corner (X and Z there, which are the map's grid x and y) and how far it runs
+ * along each. The height is the WaterView's, not the chunk's, so the level can
+ * change without remaking the chunks.
+ */
+struct WaterChunk {
+    float x;
+    float z;
+    float width;
+    float depth;
+};
+
+/**
+ * The chunks that cover a size_x by size_z area from the terrain's origin, row
+ * by row. The last row and column are cut short when the size is not a whole
+ * number of chunks, so the water never hangs over the edge of the area.
+ */
+std::vector<WaterChunk> water_chunk_layout(int size_x, int size_z, int chunk_size);
+
+/**
+ * Where the surface is, in the terrain's own Y, for water filling the voxel
+ * layers 0 to `level`: just under the top of that layer (see
+ * WATER_SURFACE_INSET). One unit is one voxel.
+ */
+float water_surface_height(int level);
+
+/**
+ * The box a chunk is tested against the camera with, at that surface height,
+ * in the terrain's own space.
+ */
+BoundingBox water_chunk_bounds(const WaterChunk& chunk, float surface_y);
+
+/**
+ * The water: a flat plane at one level over the whole map, drawn with its own
+ * shader (resources/shaders/water.vs/.fs).
+ *
+ * Kept apart from the voxels on purpose. It is not a grid, it is not meshed
+ * from voxels, it casts no shadow and is not in the shadow volumes, and the
+ * voxel code does not know it exists.
+ *
+ * Attached to the terrain all the same: the water is laid out in the
+ * terrain's own space (the space the map's chunks are meshed in) and drawn
+ * through the same world matrix the terrain is, so moving, turning or scaling
+ * the map carries the water with it. The level is the simulation's
+ * (sim::World::water_level); the view only reads it, through `level_source`.
+ *
+ * The plane is cut into WATER_CHUNK_SIZE squares and only the squares the
+ * camera can see are drawn. They are all the same flat square, so there is one
+ * mesh, drawn once per visible chunk with that chunk's place in its matrix.
+ *
+ * It opens its own BeginMode3D() block with the VoxelView's camera, so it has
+ * to be drawn after the VoxelView: the voxels' depth is still in the buffer,
+ * which is what hides the water behind a hill. That also makes it the last
+ * thing drawn in 3D, which is where anything see-through has to be.
+ */
+class WaterView : public ViewNode {
+public:
+    // The highest voxel layer the water fills. Asked every frame, so a changed
+    // level shows on the next frame. main.cpp points it at the simulation;
+    // until it is set the water stays at layer 0.
+    std::function<int()> level_source;
+    // The terrain's world matrix, the one its chunks are drawn through before
+    // each chunk's own offset. Asked every frame. Until it is set the terrain
+    // is taken to be at the world origin.
+    std::function<Matrix()> terrain_matrix;
+    // Handed to the shader as `waterColour`. The alpha is honoured.
+    Color colour{40, 110, 200, 200};
+
+    /**
+     * @param camera: the camera to draw with and to cull against. Borrowed, so
+     *        it has to outlive the view (it is the VoxelView's).
+     * @param size_x, size_z: the area to cover from the terrain's origin, in
+     *        voxels - the map's size.
+     * @param shader_path: the shader files without their extension, e.g.
+     *        "../resources/shaders/water" for water.vs and water.fs.
+     *
+     * Needs the window open: it uploads the mesh and compiles the shader.
+     */
+    WaterView(ViewNode* parent, const raylib::Camera* camera, int size_x, int size_z,
+              const std::string& shader_path);
+    ~WaterView() override;
+
+    // Owns a mesh and a shader on the GPU
+    WaterView(const WaterView&) = delete;
+    WaterView& operator=(const WaterView&) = delete;
+
+    std::string& get_view_type() override;
+    void render() override;
+
+    size_t chunk_count() const { return chunks.size(); }
+    // How many chunks the last render() drew, i.e. passed the camera test
+    size_t visible_chunk_count() const { return visible_last_frame; }
+
+    /**
+     * The matrix one chunk is drawn with: the shared mesh scaled to the chunk
+     * and moved to its place at the surface, then the terrain's world matrix
+     * on top. Plain maths, so the tests can check it.
+     */
+    static Matrix chunk_matrix(const WaterChunk& chunk, float surface_y, Matrix terrain);
+
+private:
+    const raylib::Camera* camera;
+    std::vector<WaterChunk> chunks;
+
+    // One WATER_CHUNK_SIZE square, centred on the origin and cut into a quad
+    // per unit (so a wave shader has vertices to move), shared by every chunk.
+    // A chunk that is cut short at the edge is drawn scaled down to fit.
+    Mesh chunk_mesh{};
+    // Carries the water shader, which it owns: UnloadMaterial() unloads it.
+    Material material{};
+
+    int colour_loc{-1};
+    size_t visible_last_frame{0};
+};
+
+#endif //BUSINESS_GAME_WATERVIEW_HPP

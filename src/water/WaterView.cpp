@@ -1,0 +1,113 @@
+//
+// Created by Claude on 09.10.2026.
+//
+
+#include "WaterView.hpp"
+
+#include <algorithm>
+#include <raymath.h>
+#include <rlgl.h>
+
+#include "game/Frustum.hpp"
+
+std::vector<WaterChunk> water_chunk_layout(const int size_x, const int size_z, const int chunk_size) {
+    std::vector<WaterChunk> chunks;
+    if (size_x <= 0 || size_z <= 0 || chunk_size <= 0) return chunks;
+
+    for (int z = 0; z < size_z; z += chunk_size) {
+        for (int x = 0; x < size_x; x += chunk_size) {
+            chunks.push_back(WaterChunk{
+                static_cast<float>(x),
+                static_cast<float>(z),
+                static_cast<float>(std::min(chunk_size, size_x - x)),
+                static_cast<float>(std::min(chunk_size, size_z - z)),
+            });
+        }
+    }
+    return chunks;
+}
+
+float water_surface_height(const int level) {
+    // Layer n of the voxels runs from n to n + 1 in the terrain's Y
+    return static_cast<float>(level + 1) - WATER_SURFACE_INSET;
+}
+
+BoundingBox water_chunk_bounds(const WaterChunk& chunk, const float surface_y) {
+    return BoundingBox{
+        Vector3{chunk.x, surface_y - WATER_BOUNDS_MARGIN, chunk.z},
+        Vector3{chunk.x + chunk.width, surface_y + WATER_BOUNDS_MARGIN, chunk.z + chunk.depth},
+    };
+}
+
+WaterView::WaterView(ViewNode* parent, const raylib::Camera* camera, const int size_x, const int size_z,
+                     const std::string& shader_path)
+    : ViewNode(parent), camera(camera),
+      chunks(water_chunk_layout(size_x, size_z, WATER_CHUNK_SIZE))
+{
+    chunk_mesh = GenMeshPlane(WATER_CHUNK_SIZE, WATER_CHUNK_SIZE, WATER_CHUNK_SIZE, WATER_CHUNK_SIZE);
+
+    // LoadShader() falls back to raylib's default shader if either file fails,
+    // and logs why, so a broken water shader shows up as untinted white water
+    // rather than as no water at all.
+    const std::string vertex_path = shader_path + ".vs";
+    const std::string fragment_path = shader_path + ".fs";
+    material = LoadMaterialDefault();
+    material.shader = LoadShader(vertex_path.c_str(), fragment_path.c_str());
+    colour_loc = GetShaderLocation(material.shader, "waterColour");
+}
+
+WaterView::~WaterView() {
+    UnloadMesh(chunk_mesh);
+    // Unloads the water shader with it, as it is not raylib's default one
+    UnloadMaterial(material);
+}
+
+std::string& WaterView::get_view_type() {
+    static std::string TYPE = WATER_VIEW_STR;
+    return TYPE;
+}
+
+Matrix WaterView::chunk_matrix(const WaterChunk& chunk, const float surface_y, const Matrix terrain) {
+    // The shared mesh is a full chunk centred on the origin: scale it down to
+    // a cut short chunk, move it to the chunk's centre, and then put the lot
+    // where the terrain is. raylib's MatrixMultiply applies the left one first.
+    const Matrix local = MatrixMultiply(
+        MatrixScale(chunk.width / WATER_CHUNK_SIZE, 1.0f, chunk.depth / WATER_CHUNK_SIZE),
+        MatrixTranslate(chunk.x + chunk.width * 0.5f, surface_y, chunk.z + chunk.depth * 0.5f));
+    return MatrixMultiply(local, terrain);
+}
+
+void WaterView::render() {
+    const float surface_y = water_surface_height(level_source ? level_source() : 0);
+    const Matrix terrain = terrain_matrix ? terrain_matrix() : MatrixIdentity();
+
+    const Vector4 colour_normalised = ColorNormalize(colour);
+    SetShaderValue(material.shader, colour_loc, &colour_normalised, SHADER_UNIFORM_VEC4);
+
+    BeginMode3D(*camera); {
+        // Taken from rlgl rather than worked out from the camera again, so the
+        // culling always agrees with the projection BeginMode3D() set up. The
+        // terrain's matrix goes in front, which puts the planes in the
+        // terrain's own space: the chunks' boxes are tested where they are
+        // laid out, and a moved, turned or scaled map needs no boxes rebuilt.
+        const Frustum frustum = frustum_from_matrix(MatrixMultiply(
+            terrain, MatrixMultiply(rlGetMatrixModelview(), rlGetMatrixProjection())));
+
+        // The plane has one side, and the camera can be taken below it
+        rlDisableBackfaceCulling();
+
+        size_t visible = 0;
+        for (const WaterChunk& chunk : chunks) {
+            if (!frustum_contains_box(frustum, water_chunk_bounds(chunk, surface_y))) continue;
+            DrawMesh(chunk_mesh, material, chunk_matrix(chunk, surface_y, terrain));
+            visible++;
+        }
+        visible_last_frame = visible;
+
+        rlEnableBackfaceCulling();
+    }
+    EndMode3D();
+
+    // Whatever comes after this view (the UI) is drawn on top of the water
+    ViewNode::render();
+}

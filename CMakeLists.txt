@@ -97,6 +97,10 @@ add_library(business_game_lib STATIC
         src/game/main.hpp
         src/ui/AttachMenu.cpp
         src/ui/AttachMenu.hpp
+        src/ui/GameSettingsMenu.cpp
+        src/ui/GameSettingsMenu.hpp
+        src/ui/SettingsPanel.cpp
+        src/ui/SettingsPanel.hpp
         src/ui/GridTransformMenu.cpp
         src/ui/GridTransformMenu.hpp
         src/ui/ShaderMenu.cpp
@@ -148,6 +152,10 @@ add_library(business_game_lib STATIC
         src/entity/VehicleEntity.hpp
         src/ui/VehiclePanel.cpp
         src/ui/VehiclePanel.hpp
+        src/game/Frustum.cpp
+        src/game/Frustum.hpp
+        src/water/WaterView.cpp
+        src/water/WaterView.hpp
 )
 
 # PUBLIC, so that both the game and the tests inherit them
@@ -229,11 +237,13 @@ if(BUSINESS_GAME_BUILD_TESTS)
             src/tests/TestHelpers.hpp
             src/tests/test_attachment.cpp
             src/tests/test_entity_manager.cpp
+            src/tests/test_frustum.cpp
             src/tests/test_sim_convert.cpp
             src/tests/test_transform.cpp
             src/tests/test_voxel_file.cpp
             src/tests/test_voxel_mesh.cpp
             src/tests/test_voxel_ray.cpp
+            src/tests/test_water.cpp
     )
     target_link_libraries(business_game_tests PRIVATE
             business_game_lib

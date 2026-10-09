@@ -66,6 +66,7 @@ std::vector<uint8_t> write_save(const Simulation& simulation, const CommandQueue
     write_section(out, SECTION_CORE, SECTION_CORE_VERSION, [&world](ByteWriter& w) {
         w.write_u64(world.tick);
         world.rng.write(w);
+        w.write_i32(world.water_level);
     });
     write_section(out, SECTION_ROUTES, SECTION_ROUTES_VERSION, [&world](ByteWriter& w) {
         world.routes.write(w);
@@ -86,7 +87,9 @@ std::optional<LoadedGame> read_save(const std::span<const uint8_t> bytes, std::s
 
     const std::map<uint32_t, SectionReader> readers = {
         {SECTION_CORE, {SECTION_CORE_VERSION, [&world](ByteReader& in) {
-            return in.read_u64(&world.tick) && world.rng.read(in);
+            // A level no command could have set is refused, not trusted
+            return in.read_u64(&world.tick) && world.rng.read(in)
+                && in.read_i32(&world.water_level) && world.water_level >= MIN_WATER_LEVEL;
         }}},
         {SECTION_ROUTES, {SECTION_ROUTES_VERSION, [&world](ByteReader& in) {
             return world.routes.read(in);

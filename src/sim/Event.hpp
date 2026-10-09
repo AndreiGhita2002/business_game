@@ -20,6 +20,7 @@ enum class RejectReason : uint8_t {
     InvalidAsset,     // an empty or overlong AssetId
     WrongTick,        // stamped for a different tick than the one it was handed to
     NoCommand,        // a stamped command with nothing in it
+    InvalidWaterLevel, // below the bottom of the world, see MIN_WATER_LEVEL
 };
 
 const char* reject_reason_name(RejectReason reason);

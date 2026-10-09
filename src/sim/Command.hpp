@@ -30,6 +30,7 @@ enum class CommandType : uint16_t {
     SpawnVehicle = 2,
     DespawnVehicle = 3,
     SetVehicleSpeed = 4,
+    SetWaterLevel = 5,
 };
 
 /**
@@ -120,6 +121,23 @@ public:
     RejectReason apply(World& world) const override;
     void write_payload(ByteWriter& out) const override;
     std::unique_ptr<Command> clone() const override { return std::make_unique<SetVehicleSpeed>(*this); }
+};
+
+/**
+ * Moves the sea to another level, see World::water_level. Refused below
+ * MIN_WATER_LEVEL. The simulation has no terrain to know the top of the world
+ * by, so a level above everything is allowed and simply floods it all.
+ */
+class SetWaterLevel final : public Command {
+public:
+    int32_t level;
+
+    explicit SetWaterLevel(int32_t level) : level(level) {}
+
+    CommandType type() const override { return CommandType::SetWaterLevel; }
+    RejectReason apply(World& world) const override;
+    void write_payload(ByteWriter& out) const override;
+    std::unique_ptr<Command> clone() const override { return std::make_unique<SetWaterLevel>(*this); }
 };
 
 /**

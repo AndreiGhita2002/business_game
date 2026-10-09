@@ -70,6 +70,11 @@ std::unique_ptr<Command> read_payload(const CommandType type, ByteReader& in) {
             if (!read_handle(in, &vehicle) || !in.read_fixed(&speed)) return nullptr;
             return std::make_unique<SetVehicleSpeed>(vehicle, speed);
         }
+        case CommandType::SetWaterLevel: {
+            int32_t level = 0;
+            if (!in.read_i32(&level)) return nullptr;
+            return std::make_unique<SetWaterLevel>(level);
+        }
     }
     return nullptr;
 }
@@ -108,6 +113,12 @@ RejectReason SetVehicleSpeed::apply(World& world) const {
     return RejectReason::None;
 }
 
+RejectReason SetWaterLevel::apply(World& world) const {
+    if (level < MIN_WATER_LEVEL) return RejectReason::InvalidWaterLevel;
+    world.water_level = level;
+    return RejectReason::None;
+}
+
 // --- payloads ---
 
 void AddRoute::write_payload(ByteWriter& out) const {
@@ -129,6 +140,10 @@ void DespawnVehicle::write_payload(ByteWriter& out) const {
 void SetVehicleSpeed::write_payload(ByteWriter& out) const {
     write_handle(out, vehicle);
     out.write_fixed(speed);
+}
+
+void SetWaterLevel::write_payload(ByteWriter& out) const {
+    out.write_i32(level);
 }
 
 // --- stamped commands ---
