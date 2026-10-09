@@ -234,8 +234,6 @@ VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader, const Int3 map_si
 {
     // Camera. Just off the map's corner and above the hills there, which a map
     // with ground up to 128 voxels tall would otherwise put it inside of.
-    // Close enough to the near corner of the test routes that the cars on it
-    // are inside EntityManager's realise radius from the first frame.
     camera = {
         {
             { -8.0f, 40.0f, -8.0f },

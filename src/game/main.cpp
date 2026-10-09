@@ -203,6 +203,18 @@ void global::init() {
         [](const int level) { commands.submit(std::make_unique<sim::SetWaterLevel>(level)); },
         1, sim::MIN_WATER_LEVEL, voxel_view->game_map->get_height() - 1);
 
+    // How far from the camera vehicles are drawn. A getter and a setter rather
+    // than a pointer to the radius: the entities go before the view tree in
+    // shutdown(), and the row must not hold onto them. The unrealise radius
+    // follows at the same margin, so the two never cross.
+    settings_menu->add_int_row("vehicle distance",
+        [] { return static_cast<int>(entities->realize_radius); },
+        [](const int radius) {
+            entities->realize_radius = static_cast<float>(radius);
+            entities->unrealize_radius = static_cast<float>(radius) + UNREALIZE_MARGIN;
+        },
+        16, 16, 1024);
+
     ui_view->add_child(std::move(settings_menu_node));
 
     ui_view->add_child(std::make_unique<UIButton>(ui_view, "Game Settings",

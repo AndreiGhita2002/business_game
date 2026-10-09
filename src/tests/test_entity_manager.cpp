@@ -16,6 +16,7 @@
 #include "entity/SimConvert.hpp"
 #include "game/Transform.hpp"
 #include "sim/Simulation.hpp"
+#include "voxel/VoxelFile.hpp"
 
 using sim::Fixed;
 
@@ -123,9 +124,65 @@ TEST_CASE("EntityManager: a vehicle in range gets an entity where the simulation
 
     REQUIRE_VEC3_EQ(entity->shown_pose().position, f.world_position(car));
     // The pivot is what lands on that position, so the root grid sits back
-    // from it by the pivot
-    const Vector3 root_at = entity->root_grid()->get_transform().translation;
-    REQUIRE_VEC3_EQ(root_at, Vector3Subtract(f.world_position(car), PLACEHOLDER_CAR_PIVOT));
+    // from it by the pivot, shrunk with the car
+    const Transform root = entity->root_grid()->get_transform();
+    REQUIRE_VEC3_EQ(root.translation,
+                    Vector3Subtract(f.world_position(car), Vector3Scale(PLACEHOLDER_CAR_PIVOT, root.scale.x)));
+}
+
+TEST_CASE("largest_extent: the placeholder car is 8 voxels long", "[entity][assets]") {
+    AssetRegistry assets{test::make_palette()};
+    assets.register_builder("car", placeholder_car_builder(1), PLACEHOLDER_CAR_PIVOT);
+    VoxelGrid* car = assets.instantiate("car", nullptr, nullptr);
+    REQUIRE(car != nullptr);
+
+    // 8 along x, 6 across with the wheels sticking out, 5 tall from the
+    // bottom of the wheels to the roof
+    REQUIRE(largest_extent(car) == Catch::Approx(8.0f));
+
+    // The root's own transform is not counted, but a child's is
+    Transform moved = car->get_transform();
+    moved.translation = Vector3{50.0f, 3.0f, -7.0f};
+    moved.scale = Vector3{3.0f, 3.0f, 3.0f};
+    car->set_transform(moved);
+    REQUIRE(largest_extent(car) == Catch::Approx(8.0f));
+
+    voxel_file::delete_grid_tree(car);
+
+    // Nothing solid, nothing to measure
+    SingleChunkGrid empty(nullptr, test::make_palette());
+    REQUIRE(largest_extent(&empty) == 0.0f);
+    REQUIRE(largest_extent(nullptr) == 0.0f);
+}
+
+TEST_CASE("EntityManager: a vehicle is scaled to fit a block", "[entity][manager]") {
+    Fixture f;
+    const sim::VehicleId car = f.spawn(Fixed::from_int(2), Fixed{});
+    f.present(ORIGIN);
+    VehicleEntity* entity = f.manager.vehicle(car);
+    REQUIRE(entity != nullptr);
+
+    // Its longest side times the scale is a block, BLOCK_VOXELS world units
+    const Vector3 scale = entity->root_grid()->get_transform().scale;
+    REQUIRE(scale.x == Catch::Approx(scale.y));
+    REQUIRE(scale.x == Catch::Approx(scale.z));
+    REQUIRE(largest_extent(entity->root_grid()) * scale.x == Catch::Approx(static_cast<float>(BLOCK_VOXELS)));
+    REQUIRE(scale.x == Catch::Approx(0.5f));
+
+    // The wheels are children, so they shrink with it rather than on their own
+    for (VoxelGrid* wheel : find_wheels(entity->owned_grids())) {
+        REQUIRE(wheel->get_world_transform().scale.x == Catch::Approx(0.5f));
+    }
+}
+
+TEST_CASE("EntityManager: a vehicle size of 0 leaves vehicles as built", "[entity][manager]") {
+    Fixture f;
+    f.manager.vehicle_size = 0.0f;
+    const sim::VehicleId car = f.spawn(Fixed::from_int(2), Fixed{});
+    f.present(ORIGIN);
+    VehicleEntity* entity = f.manager.vehicle(car);
+    REQUIRE(entity != nullptr);
+    REQUIRE_VEC3_EQ(entity->root_grid()->get_transform().scale, (Vector3{1.0f, 1.0f, 1.0f}));
 }
 
 TEST_CASE("EntityManager: a vehicle out of range has no entity", "[entity][manager]") {

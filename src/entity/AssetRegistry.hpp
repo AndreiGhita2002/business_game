@@ -75,6 +75,15 @@ constexpr float PLACEHOLDER_WHEEL_RADIUS = 1.5f;
 constexpr Vector3 PLACEHOLDER_CAR_PIVOT{4.0f, 0.0f, 3.0f};
 
 /**
+ * The longest side of the box around every solid voxel in a grid tree, in the
+ * root grid's model space: so in voxels of the root, with every child's place
+ * and scale relative to the root counted, and the root's own transform not.
+ * 0 for a tree with no solid voxel. Grids are read up to one chunk tall,
+ * which is every grid but a map.
+ */
+float largest_extent(VoxelGrid* root);
+
+/**
  * A builder for a small car: an 8 by 6 voxel body and cabin in `body_colour`
  * (an id in the scene's palette), with four wheel grids attached at the axle
  * ends, each named WHEEL_GRID_NAME. The car faces +X.

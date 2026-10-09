@@ -97,7 +97,8 @@ The game side:
 - `test_entity_manager.cpp` - entities realised and unrealised as vehicles come
   into and out of range (against a fake `GridSink`), placed where the
   simulation says, rebuilt after `clear()`, the wheels turning on their axles,
-  and presenting never changing the simulation's checksum.
+  presenting never changing the simulation's checksum, `largest_extent()` of
+  the placeholder car, and a vehicle scaled to fit a block.
 - `test_transform.cpp` - the maths in `game/Transform.hpp`.
 - `test_attachment.cpp` - the grid hierarchy and the attachment system.
 - `test_voxel_file.cpp` - the `.bgvox` chunk encoding, scalars and whole files.
@@ -251,9 +252,18 @@ square root), and a vehicle drives round one at a fixed speed per tick.
   smooth (at the cost of being up to a tick behind).
 - `EntityManager` realises an entity for every vehicle within
   `realize_radius` of the camera and drops it past `unrealize_radius` (two
-  radii, so the boundary does not flicker). A vehicle without an entity keeps
+  radii, so the boundary does not flicker; 448 and 512 by default, which
+  covers the whole 128 voxel map). A vehicle without an entity keeps
   driving; when the camera comes back it reappears exactly where the
   simulation has it. Nothing flows back into the simulation.
+- **Vehicles are scaled to fit a block.** As it realises one, the manager
+  scales the root grid evenly so that `largest_extent()` of the tree (the
+  longest side of the box round every solid voxel, wheels included, in the
+  root's voxels) times the scale is `vehicle_size`, `VEHICLE_SIZE` =
+  `BLOCK_VOXELS` world units. The placeholder car is 8 voxels long, so it is
+  drawn at half scale. The wheels are children and shrink with it, and their
+  spin radius is scaled too so they still roll without slipping. A
+  `vehicle_size` of 0 draws vehicles as built.
 - `AssetRegistry` turns a `sim::AssetId` (a name like `"car.blue"`) into a grid
   tree, from a `.bgvox` file or a builder function. `placeholder_car_builder()`
   builds a car in code: a body plus four wheel grids attached through
@@ -609,7 +619,10 @@ Hand-rolled retained-mode UI in `src/ui`:
   which sits one shader panel's width to the right of "Shader Menu" so both
   panels can be open at once. It has no rows of its own; `main.cpp` adds them.
   The first is the water level (0 to the map's height - 1), which reads
-  `simulation->water_level()` and submits `SetWaterLevel`.
+  `simulation->water_level()` and submits `SetWaterLevel`. The second is the
+  vehicle distance (16 to 1024), the `EntityManager`'s realise radius, with the
+  unrealise radius kept `UNREALIZE_MARGIN` beyond it. It is a getter/setter
+  row rather than a pointer, as the entities are freed before the panel.
 
 The sun's keybind (U) is mirrored by a button in the bottom left, and its angle
 in the sky by the shader menu rows; both write the same light. The camera

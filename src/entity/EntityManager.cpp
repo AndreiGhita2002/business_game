@@ -93,10 +93,23 @@ void EntityManager::realize(const sim::Simulation& sim, const sim::VehicleId id,
         return;
     }
 
+    // Scaled to fit before the entity places it, which takes the scale into
+    // account when it puts the pivot on the simulation's position
+    float scale = 1.0f;
+    const float extent = largest_extent(root);
+    if (vehicle_size > 0.0f && extent > 0.0f) scale = vehicle_size / extent;
+    Transform root_transform = root->get_transform();
+    root_transform.scale = Vector3{scale, scale, scale};
+    root->set_transform(root_transform);
+
     auto entity = std::make_unique<VehicleEntity>(id, sink, root, pivot, sim);
     const std::vector<VoxelGrid*> wheels = find_wheels(entity->owned_grids());
     if (!wheels.empty()) {
-        entity->add_script(std::make_unique<WheelSpinScript>(entity.get(), wheels, PLACEHOLDER_WHEEL_RADIUS));
+        // The wheels shrink with the rest of the car, and a smaller wheel has
+        // to turn faster to cover the same ground: the script wants the
+        // radius in world units, the same units as the speed
+        entity->add_script(std::make_unique<WheelSpinScript>(entity.get(), wheels,
+                                                             PLACEHOLDER_WHEEL_RADIUS * scale));
     }
 
     for (const VoxelGrid* grid : entity->owned_grids()) by_grid[grid] = entity.get();

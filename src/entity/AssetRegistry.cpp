@@ -4,8 +4,14 @@
 
 #include "entity/AssetRegistry.hpp"
 
+#include <algorithm>
+#include <cfloat>
 #include <utility>
+#include <vector>
 
+#include <raymath.h>
+
+#include "game/Transform.hpp"
 #include "voxel/SingleChunkGrid.hpp"
 #include "voxel/VoxelFile.hpp"
 
@@ -37,6 +43,59 @@ VoxelGrid* AssetRegistry::instantiate(const sim::AssetId& id, VoxelView* view, V
 
     if (root != nullptr && out_pivot != nullptr) *out_pivot = def.pivot;
     return root;
+}
+
+float largest_extent(VoxelGrid* root) {
+    if (root == nullptr) return 0.0f;
+
+    std::vector<VoxelGrid*> grids;
+    voxel_file::collect_grids(root, &grids);
+
+    // Every grid's place relative to the root, whatever the root itself is
+    // doing: its world matrix with the root's taken back off
+    const Matrix root_inverse = MatrixInvert(transform_to_matrix(root->get_world_transform()));
+
+    Vector3 lo{FLT_MAX, FLT_MAX, FLT_MAX};
+    Vector3 hi{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+    bool any = false;
+
+    for (VoxelGrid* grid : grids) {
+        // The box around this grid's solid voxels, in its own grid coordinates
+        const Int2 size = grid->get_size();
+        Int3 min{INT32_MAX, INT32_MAX, INT32_MAX};
+        Int3 max{INT32_MIN, INT32_MIN, INT32_MIN};
+        bool solid = false;
+        for (int x = 0; x < size.x; ++x) {
+            for (int y = 0; y < size.y; ++y) {
+                for (int z = 0; z < CHUNK_SIZE; ++z) {
+                    if (!grid->is_solid(Int3{x, y, z})) continue;
+                    solid = true;
+                    min = Int3{std::min(min.x, x), std::min(min.y, y), std::min(min.z, z)};
+                    max = Int3{std::max(max.x, x), std::max(max.y, y), std::max(max.z, z)};
+                }
+            }
+        }
+        if (!solid) continue;
+        any = true;
+
+        // Its corners into the root's model space. Model space is the mesher's,
+        // (grid x, grid z, grid y), and voxel v spans v to v + 1.
+        const Matrix to_root = MatrixMultiply(transform_to_matrix(grid->get_world_transform()), root_inverse);
+        for (int corner = 0; corner < 8; ++corner) {
+            const Vector3 model{
+                static_cast<float>(corner & 1 ? max.x + 1 : min.x),
+                static_cast<float>(corner & 2 ? max.z + 1 : min.z),
+                static_cast<float>(corner & 4 ? max.y + 1 : min.y),
+            };
+            const Vector3 p = Vector3Transform(model, to_root);
+            lo = Vector3Min(lo, p);
+            hi = Vector3Max(hi, p);
+        }
+    }
+
+    if (!any) return 0.0f;
+    const Vector3 extent = Vector3Subtract(hi, lo);
+    return std::max(extent.x, std::max(extent.y, extent.z));
 }
 
 // --- Placeholder car ---

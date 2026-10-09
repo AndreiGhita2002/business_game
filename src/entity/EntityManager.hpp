@@ -14,14 +14,23 @@
 
 #include "entity/AssetRegistry.hpp"
 #include "entity/GridSink.hpp"
+#include "entity/TerrainVoxels.hpp"
 #include "entity/VehicleEntity.hpp"
 #include "sim/Simulation.hpp"
 
 class VoxelView;
 
 // Default radii, in world units, see EntityManager::realize_radius
-constexpr float DEFAULT_REALIZE_RADIUS = 56.0f;
-constexpr float DEFAULT_UNREALIZE_RADIUS = 64.0f;
+constexpr float DEFAULT_REALIZE_RADIUS = 448.0f;
+constexpr float DEFAULT_UNREALIZE_RADIUS = 512.0f;
+// How much further out an entity is dropped than it is built, for anything
+// that moves the realise radius and has to bring the other one with it
+constexpr float UNREALIZE_MARGIN = DEFAULT_UNREALIZE_RADIUS - DEFAULT_REALIZE_RADIUS;
+
+// How long a vehicle's longest side is drawn, in world units: one block, as
+// the map draws a block BLOCK_VOXELS voxels across and a voxel one world unit
+// across. See EntityManager::vehicle_size.
+constexpr float VEHICLE_SIZE = static_cast<float>(BLOCK_VOXELS);
 
 /**
  * Whether a simulation object at `distance` from the camera should have an
@@ -49,6 +58,11 @@ public:
     float realize_radius = DEFAULT_REALIZE_RADIUS;
     // ...and one further than this loses it
     float unrealize_radius = DEFAULT_UNREALIZE_RADIUS;
+    // Every vehicle is scaled, evenly on all three axes, so that its longest
+    // side (largest_extent() of its grids) comes out this long in the world.
+    // Assets are built in voxels of whatever size suits them; this is what
+    // makes them all fit a block. 0 draws them at the size they were built.
+    float vehicle_size = VEHICLE_SIZE;
 
     /**
      * @param sink: where the entities' grids are drawn.
