@@ -5,6 +5,7 @@
 #include "WaterView.hpp"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <raymath.h>
 #include <rlgl.h>
@@ -79,7 +80,8 @@ BoundingBox transform_box(const BoundingBox box, const Matrix matrix) {
 WaterView::WaterView(ViewNode* parent, const raylib::Camera* camera, const int size_x, const int size_z,
                      const std::string& shader_path)
     : ViewNode(parent), camera(camera),
-      chunks(water_chunk_layout(size_x, size_z, WATER_CHUNK_SIZE))
+      chunks(water_chunk_layout(size_x, size_z, WATER_CHUNK_SIZE)),
+      cells(water_cell_layout(size_x, size_z, WATER_CELL_SIZE, WATER_CHUNK_SIZE))
 {
     chunk_mesh = GenMeshPlane(WATER_CHUNK_SIZE, WATER_CHUNK_SIZE, WATER_CHUNK_SIZE, WATER_CHUNK_SIZE);
     // The same square as one quad, for what is flat: the sea floor, which is
@@ -101,6 +103,8 @@ WaterView::WaterView(ViewNode* parent, const raylib::Camera* camera, const int s
     wave_speed_loc = GetShaderLocation(material.shader, "waveSpeed");
     wave_fade_loc = GetShaderLocation(material.shader, "waveFade");
     camera_position_loc = GetShaderLocation(material.shader, "cameraPosition");
+    fog_colour_loc = GetShaderLocation(material.shader, "fogColour");
+    fog_range_loc = GetShaderLocation(material.shader, "fogRange");
 }
 
 WaterView::~WaterView() {
@@ -135,6 +139,30 @@ Matrix WaterView::chunk_matrix(const WaterChunk& chunk, const float surface_y, c
 
 void WaterView::set_area(const int size_x, const int size_z) {
     chunks = water_chunk_layout(size_x, size_z, WATER_CHUNK_SIZE);
+    cells = water_cell_layout(size_x, size_z, WATER_CELL_SIZE, WATER_CHUNK_SIZE);
+}
+
+std::vector<WaterCell> water_cell_layout(const int size_x, const int size_z, const int cell_size,
+                                         const int chunk_size) {
+    std::vector<WaterCell> cells;
+    if (size_x <= 0 || size_z <= 0 || chunk_size <= 0 || cell_size <= 0 || cell_size % chunk_size != 0)
+        return cells;
+
+    // The chunks are laid out row by row (water_chunk_layout()), so chunk
+    // (i, j) is number i + j * chunks_per_row
+    const int chunks_per_row = (size_x + chunk_size - 1) / chunk_size;
+    for (const WaterChunk& rect : water_chunk_layout(size_x, size_z, cell_size)) {
+        WaterCell cell{rect, {}};
+        const int i0 = static_cast<int>(rect.x) / chunk_size;
+        const int j0 = static_cast<int>(rect.z) / chunk_size;
+        const int i1 = (static_cast<int>(rect.x + rect.width) + chunk_size - 1) / chunk_size;
+        const int j1 = (static_cast<int>(rect.z + rect.depth) + chunk_size - 1) / chunk_size;
+        for (int j = j0; j < j1; ++j) {
+            for (int i = i0; i < i1; ++i) cell.chunks.push_back(static_cast<size_t>(i + j * chunks_per_row));
+        }
+        cells.push_back(std::move(cell));
+    }
+    return cells;
 }
 
 void WaterView::set_floor(std::vector<WaterChunk> rects, const float height) {
@@ -163,37 +191,30 @@ void WaterView::render() {
     SetShaderValue(material.shader, camera_position_loc, &eye, SHADER_UNIFORM_VEC3);
     SetShaderValue(material.shader, wave_fade_loc, fade, SHADER_UNIFORM_VEC2);
 
-    // Draws every square of `squares` the camera can see at height y, with
-    // `mesh`, or with `far_mesh` (when there is one) where the whole square
-    // is past the fade, which also means its edges are flat wherever it meets
-    // a square drawn in full. The colour and amplitude are whatever the
-    // shader was last given.
-    full_detail_last_frame = 0;
-    const auto draw_squares = [this, &terrain, &eye, &fade](const Mesh& mesh, const Mesh* far_mesh,
-                                                           const Frustum& frustum,
-                                                           const std::vector<WaterChunk>& squares, const float y) {
-        size_t visible = 0;
-        for (const WaterChunk& chunk : squares) {
-            const BoundingBox box = water_chunk_bounds(chunk, y);
-            if (!frustum_contains_box(frustum, box)) continue;
+    // The fog, the same as the voxels' so the shore and the sea fade together
+    const Fog none{BLANK, FLT_MAX, FLT_MAX};
+    const Fog& f = fog != nullptr ? *fog : none;
+    const Vector4 fog_colour = ColorNormalize(f.colour);
+    const float fog_range[2] = {f.start, f.end};
+    SetShaderValue(material.shader, fog_colour_loc, &fog_colour, SHADER_UNIFORM_VEC3);
+    SetShaderValue(material.shader, fog_range_loc, fog_range, SHADER_UNIFORM_VEC2);
 
-            const Mesh* drawn = &mesh;
-            if (far_mesh != nullptr) {
-                if (distance_to_box(eye, transform_box(box, terrain)) >= fade[1]) drawn = far_mesh;
-                else full_detail_last_frame++;
-            }
-
-            // The same placement chunk_matrix() makes, as numbers, so the
-            // shader can find each vertex on the terrain for its wave
-            const Vector4 rect = {
-                chunk.x + chunk.width * 0.5f, chunk.z + chunk.depth * 0.5f,
-                chunk.width / WATER_CHUNK_SIZE, chunk.depth / WATER_CHUNK_SIZE,
-            };
-            SetShaderValue(material.shader, chunk_rect_loc, &rect, SHADER_UNIFORM_VEC4);
-            DrawMesh(*drawn, material, chunk_matrix(chunk, y, terrain));
-            visible++;
-        }
-        return visible;
+    // One square drawn with `mesh` at height y. The same placement
+    // chunk_matrix() makes is handed to the shader as numbers, so it can find
+    // each vertex on the terrain for its wave. The colour and amplitude are
+    // whatever the shader was last given.
+    const auto draw_square = [this, &terrain](const Mesh& mesh, const WaterChunk& square, const float y) {
+        const Vector4 rect = {
+            square.x + square.width * 0.5f, square.z + square.depth * 0.5f,
+            square.width / WATER_CHUNK_SIZE, square.depth / WATER_CHUNK_SIZE,
+        };
+        SetShaderValue(material.shader, chunk_rect_loc, &rect, SHADER_UNIFORM_VEC4);
+        DrawMesh(mesh, material, chunk_matrix(square, y, terrain));
+    };
+    // Whether every point of a box is past the waves' fade, which means it is
+    // flat, edges included, wherever it meets water drawn in full
+    const auto past_fade = [&terrain, &eye, &fade](const BoundingBox& box) {
+        return distance_to_box(eye, transform_box(box, terrain)) >= fade[1];
     };
 
     BeginMode3D(*camera); {
@@ -215,13 +236,41 @@ void WaterView::render() {
             const float still = 0.0f;
             SetShaderValue(material.shader, colour_loc, &floor_normalised, SHADER_UNIFORM_VEC4);
             SetShaderValue(material.shader, wave_amplitude_loc, &still, SHADER_UNIFORM_FLOAT);
-            draw_squares(flat_mesh, nullptr, frustum, floor_rects, floor_height);
+            for (const WaterChunk& square : floor_rects) {
+                if (frustum_contains_box(frustum, water_chunk_bounds(square, floor_height)))
+                    draw_square(flat_mesh, square, floor_height);
+            }
         }
 
         const Vector4 colour_normalised = ColorNormalize(colour);
         SetShaderValue(material.shader, colour_loc, &colour_normalised, SHADER_UNIFORM_VEC4);
         SetShaderValue(material.shader, wave_amplitude_loc, &amplitude, SHADER_UNIFORM_FLOAT);
-        visible_last_frame = draw_squares(chunk_mesh, &flat_mesh, frustum, chunks, surface_y);
+
+        // A cell at a time: a whole cell past the fade is one flat quad,
+        // which is most of the sea once the camera can see thousands of
+        // voxels out. Nearer than that, its chunks are drawn one by one, each
+        // in full where the waves reach it and flat where they have faded.
+        size_t draws = 0;
+        full_detail_last_frame = 0;
+        for (const WaterCell& cell : cells) {
+            const BoundingBox cell_box = water_chunk_bounds(cell.rect, surface_y);
+            if (!frustum_contains_box(frustum, cell_box)) continue;
+            if (past_fade(cell_box)) {
+                draw_square(flat_mesh, cell.rect, surface_y);
+                draws++;
+                continue;
+            }
+            for (const size_t i : cell.chunks) {
+                const WaterChunk& chunk = chunks[i];
+                const BoundingBox box = water_chunk_bounds(chunk, surface_y);
+                if (!frustum_contains_box(frustum, box)) continue;
+                const bool flat = past_fade(box);
+                draw_square(flat ? flat_mesh : chunk_mesh, chunk, surface_y);
+                if (!flat) full_detail_last_frame++;
+                draws++;
+            }
+        }
+        visible_last_frame = draws;
 
         rlEnableBackfaceCulling();
     }

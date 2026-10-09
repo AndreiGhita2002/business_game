@@ -94,6 +94,19 @@ uniform int debugShadowSteps;
 // Output
 out vec4 finalColor;
 
+// Distance fog, the same in lighting.fs and water.fs: everything fades into
+// fogColour (display space, the frame's clear colour) between fogRange.x and
+// fogRange.y world units from the camera. fog_amount() in game/Fog.hpp is the
+// C++ twin: change the three together.
+uniform vec3 fogColour;
+uniform vec2 fogRange;
+
+float fog_amount(float distance_to_camera) {
+    if (fogRange.y <= fogRange.x) return distance_to_camera < fogRange.x ? 0.0 : 1.0;
+    float t = clamp((distance_to_camera - fogRange.x) / (fogRange.y - fogRange.x), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
 // A point in world space, in voxel coordinates of whichever volume `m` undoes.
 vec3 to_voxel(mat4 m, vec3 p) {
     vec3 v = (m * vec4(p, 1.0)).xyz;
@@ -348,4 +361,8 @@ void main() {
 
     finalColor = vec4(lit, alpha);
     finalColor = pow(finalColor, vec4(1.0 / 2.2));
+
+    // Fog last, after the gamma, as its colour is the clear colour as it is
+    // shown on screen
+    finalColor.rgb = mix(finalColor.rgb, fogColour, fog_amount(length(viewPos - fragPosition)));
 }

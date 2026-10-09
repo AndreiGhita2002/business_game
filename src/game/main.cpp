@@ -15,6 +15,7 @@
 #include <regex>
 
 #include "raylib-cpp.hpp"
+#include <rlgl.h>
 #include "entity/TerrainVoxels.hpp"
 #include "sim/Island.hpp"
 #include "voxel/VoxelMesher.hpp"
@@ -59,6 +60,11 @@ constexpr const char* QUICKSAVE_PATH = "../saves/quicksave.bgsave";
 constexpr int QUICKSAVE_KEY = KEY_F5;
 constexpr int QUICKLOAD_KEY = KEY_F9;
 
+// The camera's near and far clip planes, in world units (a voxel is one), see
+// init(). The far one covers the default world corner to corner.
+constexpr double CAMERA_NEAR = 0.5;
+constexpr double CAMERA_FAR = 4000.0;
+
 // The least serious log message printed, see init()
 constexpr TraceLogLevel LOG_LEVEL = LOG_WARNING;
 
@@ -90,6 +96,14 @@ void global::init() {
     // it is undone. A flags argument of 0 leaves the MSAA flag above alone.
     raylib::Window::Init(1600, 900, "business game", 0, LOG_LEVEL);
 
+    // How near and far the camera sees, which BeginMode3D() builds every
+    // projection with. raylib's own 0.01 to 1000 cut the world off a thousand
+    // voxels out, well short of its far side, and its tiny near plane spent
+    // the depth buffer's precision on the first metre, leaving the distance
+    // coarse enough for the water to fight the ground. The fog ends short of
+    // the far plane, so the edge is never seen.
+    rlSetClipPlanes(CAMERA_NEAR, CAMERA_FAR);
+
     // Escape is a tool's "give up on this selection" key - the attachment menu
     // and the grid transform menu both offer it - so it cannot also be the one
     // that closes the window. The window button is the way out now.
@@ -113,6 +127,7 @@ void global::init() {
     root_view->add_child(std::make_unique<VoxelView>(root_view.get(), &voxel_shader,
                                                      terrain_voxel_size(simulation->terrain())));
     voxel_view = static_cast<VoxelView *>(root_view->child.get());
+    voxel_view->fog = &fog;
 
     // Water over the whole map. A sibling of the VoxelView, after it, as it
     // needs the voxels' depth in the buffer to be hidden behind the terrain,
@@ -124,6 +139,8 @@ void global::init() {
     // Its level is the simulation's, read through the global rather than a
     // captured pointer so a loaded game (assigned into it) is read too
     water_view->level_source = [] { return static_cast<int>(simulation->water_level()); };
+    // The same fog as the voxels
+    water_view->fog = &fog;
     // Drawn through the same world matrix as the map's chunks, so the two stay
     // together wherever the map is put (see voxel_model_matrix())
     water_view->terrain_matrix = [] {
@@ -194,6 +211,12 @@ void global::init() {
     shader_menu->add_value_row("sun azimuth",
         &voxel_view->lights[voxel_view->sun_light_id].azimuth,
         5.0f, 0.0f, 360.0f, 0, {});
+
+    // Where the fog starts and where it is total, in world units from the
+    // camera. Both shaders read global::fog every frame. The end is kept short
+    // of the far clip plane, or the world's edge would show through it.
+    shader_menu->add_value_row("fog start", &fog.start, 100.0f, 0.0f, static_cast<float>(CAMERA_FAR), 0, {});
+    shader_menu->add_value_row("fog end", &fog.end, 100.0f, 100.0f, static_cast<float>(CAMERA_FAR), 0, {});
 
     ui_view->add_child(std::move(shader_menu_node));
 
@@ -408,7 +431,8 @@ void global::mainLoop() {
     // The whole frame is drawn inside a single Begin/EndDrawing block, so that
     // every ViewNode draws in tree order: the voxel scene first, the UI on top.
     BeginDrawing(); {
-        ClearBackground(RAYWHITE);
+        // The fog's colour, so ground faded all the way into it is the sky
+        ClearBackground(fog.colour);
         root_view->render();
     }
     EndDrawing();

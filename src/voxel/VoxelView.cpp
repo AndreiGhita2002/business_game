@@ -5,6 +5,7 @@
 #include "VoxelView.hpp"
 
 #include <algorithm>
+#include <cfloat>
 #include <cstdlib>
 #include <rlgl.h>
 
@@ -47,6 +48,15 @@ void VoxelView::render() {
     // global::mainLoop(), so that the UI views can draw on top of this one.
     rlEnableShader(voxel_shader->id);
     bindWorldVolume();
+
+    // The fog, read fresh every frame so the menu's rows show at once. No fog
+    // is a range that starts past anything the camera can see.
+    const Fog none{BLANK, FLT_MAX, FLT_MAX};
+    const Fog& f = fog != nullptr ? *fog : none;
+    const Vector4 fog_colour = ColorNormalize(f.colour);
+    const float fog_range[2] = {f.start, f.end};
+    SetShaderValue(*voxel_shader, fog_colour_loc, &fog_colour, SHADER_UNIFORM_VEC3);
+    SetShaderValue(*voxel_shader, fog_range_loc, fog_range, SHADER_UNIFORM_VEC2);
 
     BeginMode3D(camera); {
         drawVoxelScene();
@@ -333,6 +343,8 @@ VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader, const Int3 map_si
     world_to_volume_loc = GetShaderLocation(*voxel_shader, "worldToVolume");
     volume_size_loc = GetShaderLocation(*voxel_shader, "volumeSize");
     world_coarse_loc = GetShaderLocation(*voxel_shader, "worldCoarse");
+    fog_colour_loc = GetShaderLocation(*voxel_shader, "fogColour");
+    fog_range_loc = GetShaderLocation(*voxel_shader, "fogRange");
     grid_atlas_loc = GetShaderLocation(*voxel_shader, "gridAtlas");
     grid_volume_count_loc = GetShaderLocation(*voxel_shader, "gridVolumeCount");
     for (int i = 0; i < MAX_GRID_VOLUMES; ++i) {

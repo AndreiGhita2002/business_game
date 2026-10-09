@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "game/Fog.hpp"
 #include "game/ViewNode.hpp"
 
 #define WATER_VIEW_STR "WaterView"
@@ -19,6 +20,10 @@
 // sea down to a few hundred draw calls at most, each chunk a mesh of 64 by 64
 // quads for the waves.
 #define WATER_CHUNK_SIZE 64
+
+// Chunks are drawn in cells of this many units a side (4 by 4 chunks, a
+// terrain cell): a cell wholly past the waves' fade is one flat quad.
+#define WATER_CELL_SIZE 256
 
 // How far below the top of its voxel layer the water's surface sits, so that
 // it is never in the same plane as the top of a column whose ground is at the
@@ -63,6 +68,20 @@ struct WaterChunk {
  * number of chunks, so the water never hangs over the edge of the area.
  */
 std::vector<WaterChunk> water_chunk_layout(int size_x, int size_z, int chunk_size);
+
+/** A WATER_CELL_SIZE square of water, and which chunks of the chunk layout it covers. */
+struct WaterCell {
+    WaterChunk rect;
+    std::vector<size_t> chunks;
+};
+
+/**
+ * The cells over a size_x by size_z area, row by row, cut short at the edges
+ * as the chunks are, each with the indices of its chunks in
+ * water_chunk_layout(size_x, size_z, chunk_size). A cell has to be a whole
+ * number of chunks.
+ */
+std::vector<WaterCell> water_cell_layout(int size_x, int size_z, int cell_size, int chunk_size);
 
 /**
  * Where the surface is, in the terrain's own Y, for water filling the voxel
@@ -132,6 +151,9 @@ public:
     // each chunk's own offset. Asked every frame. Until it is set the terrain
     // is taken to be at the world origin.
     std::function<Matrix()> terrain_matrix;
+    // The fog the water fades into, the same one the voxels use. Borrowed
+    // (global::fog), and no fog while it is null.
+    const Fog* fog = nullptr;
     // Handed to the shader as `waterColour`. The alpha is honoured: 179 is
     // 0.7, so the ground under the water shows through.
     Color colour{40, 110, 200, 179};
@@ -186,7 +208,8 @@ public:
     void set_floor(std::vector<WaterChunk> rects, float height);
 
     size_t chunk_count() const { return chunks.size(); }
-    // How many chunks the last render() drew, i.e. passed the camera test
+    // How many squares of water the last render() drew: chunks, and whole
+    // cells drawn flat
     size_t visible_chunk_count() const { return visible_last_frame; }
     // How many of them were drawn in full detail, the rest being flat quads
     size_t full_detail_chunk_count() const { return full_detail_last_frame; }
@@ -201,6 +224,7 @@ public:
 private:
     const raylib::Camera* camera;
     std::vector<WaterChunk> chunks;
+    std::vector<WaterCell> cells;
     std::vector<WaterChunk> floor_rects;
     float floor_height{0.0f};
 
@@ -222,6 +246,8 @@ private:
     int wave_speed_loc{-1};
     int wave_fade_loc{-1};
     int camera_position_loc{-1};
+    int fog_colour_loc{-1};
+    int fog_range_loc{-1};
 
     // Frame time, not game time: the waves are cosmetic and keep moving while
     // the simulation is paused. Wrapped round once a wave period, which

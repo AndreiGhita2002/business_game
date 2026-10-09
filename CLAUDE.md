@@ -125,10 +125,11 @@ The game side:
   that decide which grids a draw call is traced against.
 - `test_frustum.cpp` - `game/Frustum`: boxes kept and thrown away against a
   camera built the way `BeginMode3D()` builds one.
-- `test_water.cpp` - how the water is cut into chunks, where its surface sits,
+- `test_water.cpp` - how the water is cut into chunks and cells, where its surface sits,
   which chunks a camera over one corner keeps, the chunks following the
   terrain's transform, and the waves through `water_wave_height()`, the twin
-  of the vertex shader's. The `WaterView` itself needs
+  of the vertex shader's, the waves' fade with distance, and `fog_amount()`.
+  The `WaterView` itself needs
   a GL context and is never built.
 - `test_terrain_voxels.cpp` - `entity/TerrainVoxels`: each block type's voxels
   and its colour in the palette, which blocks get lowered edges and trims,
@@ -579,6 +580,19 @@ Two-pass system in `src/voxel/VoxelView.cpp/hpp`:
 1. **Main Pass** - Render with the lighting shader, which traces its own shadows
 2. **UI Pass** - Overlay UI elements
 
+**Clip planes and fog.** `init()` sets the camera's clip planes with
+`rlSetClipPlanes(CAMERA_NEAR, CAMERA_FAR)` (0.5 and 4000 world units), which
+every `BeginMode3D()` builds its projection from; raylib's own 0.01 to 1000
+cut the world off a thousand voxels out and wasted the depth buffer on the
+first metre. **Distance fog** (`game/Fog.hpp`, one `global::fog` that both
+the VoxelView and the WaterView point at) fades everything into its colour
+between `start` (1200) and `end` (3800), smoothstep, after the gamma in
+`lighting.fs` and on the flat colour in `water.fs`; `fog_amount()` is the C++
+twin of both shaders' function, **change the three together**. The frame is
+cleared to the fog colour, so the end of the fog is the sky and the far plane
+is never seen; keep `end` short of `CAMERA_FAR`. The shader menu's "fog
+start" / "fog end" rows edit it live.
+
 `drawVoxelScene()` draws only the models whose chunk cube (`voxel_box_bounds`
 of their matrix) is inside the camera's frustum, taken from rlgl inside the 3D
 block as the water does, and draws them **nearest first**, so the depth test
@@ -723,7 +737,9 @@ and saved in `CORE`. Nothing in the simulation reads it yet.
   is drawn with `flat_mesh`, one quad, instead of the 64 by 64 wave mesh. No
   seam: the edge a flat chunk shares with a full one is past the fade too, so
   it is flat on both sides. `full_detail_chunk_count()` says how many were
-  drawn in full.
+  drawn in full. The chunks are drawn a `WATER_CELL_SIZE` (256) cell at a
+  time (`water_cell_layout()`): a cell wholly past the fade is one flat quad,
+  which is most of the sea once the camera sees thousands of voxels out.
 - The shader is owned by the material: `UnloadMaterial()` in the destructor
   unloads it, while the window is still open (the view tree goes before it).
 
@@ -756,7 +772,7 @@ Hand-rolled retained-mode UI in `src/ui`:
   hidden until F3 or its own button. One row per tunable: the ambient level,
   how much ambient occlusion comes off direct light, and the shadow step view,
   all shader uniforms it owns the starting values for. `main.cpp` adds the
-  sun's elevation and azimuth rows to it.
+  sun's elevation and azimuth rows to it, and the fog's start and end.
 - **GameSettingsMenu** (`src/ui/GameSettingsMenu.cpp/hpp`) - A SettingsPanel
   for the world's settings, hidden until F4 or its "Game Settings" button,
   which sits one shader panel's width to the right of "Shader Menu" so both

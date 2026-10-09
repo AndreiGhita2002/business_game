@@ -4,6 +4,9 @@
 
 #include "TestHelpers.hpp"
 
+#include <set>
+
+#include "game/Fog.hpp"
 #include "game/Frustum.hpp"
 #include "water/WaterView.hpp"
 
@@ -267,4 +270,56 @@ TEST_CASE("a chunk wholly past the fade is flat where it meets a full one", "[wa
             REQUIRE(water_wave_fade(d, WATER_WAVE_FADE_NEAR, WATER_WAVE_FADE_FAR) == 0.0f);
         }
     }
+}
+
+TEST_CASE("cells cover every chunk exactly once", "[water]") {
+    // Not a whole number of cells or of chunks either way, so the last row
+    // and column of both are cut short
+    const int size_x = 300;
+    const int size_z = 130;
+    const auto chunks = water_chunk_layout(size_x, size_z, WATER_CHUNK_SIZE);
+    const auto cells = water_cell_layout(size_x, size_z, WATER_CELL_SIZE, WATER_CHUNK_SIZE);
+    REQUIRE(cells.size() == 2 * 1);
+
+    std::set<size_t> seen;
+    for (const WaterCell& cell : cells) {
+        for (const size_t i : cell.chunks) {
+            REQUIRE(i < chunks.size());
+            REQUIRE(seen.insert(i).second);
+            // Each of a cell's chunks lies inside it
+            const WaterChunk& c = chunks[i];
+            REQUIRE(c.x >= cell.rect.x);
+            REQUIRE(c.z >= cell.rect.z);
+            REQUIRE(c.x + c.width <= cell.rect.x + cell.rect.width);
+            REQUIRE(c.z + c.depth <= cell.rect.z + cell.rect.depth);
+        }
+    }
+    REQUIRE(seen.size() == chunks.size());
+
+    // The full cell is four by three chunks here (130 is two rows and a bit),
+    // the cut one a single column of them
+    REQUIRE(cells[0].chunks.size() == 4 * 3);
+    REQUIRE(cells[1].rect.width == Approx(300.0f - 256.0f));
+    REQUIRE(cells[1].chunks.size() == 1 * 3);
+
+    // A cell that is not whole chunks is refused
+    REQUIRE(water_cell_layout(size_x, size_z, 100, WATER_CHUNK_SIZE).empty());
+}
+
+TEST_CASE("fog comes in gently between its start and end", "[fog]") {
+    REQUIRE(fog_amount(0.0f, 100.0f, 300.0f) == 0.0f);
+    REQUIRE(fog_amount(100.0f, 100.0f, 300.0f) == 0.0f);
+    REQUIRE(fog_amount(200.0f, 100.0f, 300.0f) == Approx(0.5f));
+    REQUIRE(fog_amount(300.0f, 100.0f, 300.0f) == 1.0f);
+    REQUIRE(fog_amount(9000.0f, 100.0f, 300.0f) == 1.0f);
+    // Smoothstep: slow off the start, slow into the end
+    REQUIRE(fog_amount(120.0f, 100.0f, 300.0f) < 0.1f);
+    REQUIRE(fog_amount(280.0f, 100.0f, 300.0f) > 0.9f);
+    // No width is a hard edge
+    REQUIRE(fog_amount(99.0f, 100.0f, 100.0f) == 0.0f);
+    REQUIRE(fog_amount(101.0f, 100.0f, 100.0f) == 1.0f);
+    // The defaults finish short of the far clip plane (4000 in main.cpp)
+    const Fog fog;
+    REQUIRE(fog.start < fog.end);
+    REQUIRE(fog.end < 4000.0f);
 }

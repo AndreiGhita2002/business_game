@@ -12,6 +12,7 @@
 #include "ViewNode.hpp"
 #include "entity/AssetRegistry.hpp"
 #include "entity/EntityManager.hpp"
+#include "game/Fog.hpp"
 #include "game/Script.hpp"
 #include "game/Picking.hpp"
 #include "game/Transform.hpp"
@@ -28,6 +29,9 @@ namespace global {
     inline bool limit_render_distance = false;
 
     inline raylib::Shader voxel_shader;
+    // The fog the voxels and the water both fade into, and the colour every
+    // frame is cleared to (game/Fog.hpp)
+    inline Fog fog;
     inline float ambient[4] = {0.06f, 0.06f, 0.06f, 1.0f};
 
     inline std::unique_ptr<ViewNode> root_view;

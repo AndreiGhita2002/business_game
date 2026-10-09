@@ -171,6 +171,7 @@ add_library(business_game_lib STATIC
         src/ui/VehiclePanel.hpp
         src/game/Frustum.cpp
         src/game/Frustum.hpp
+        src/game/Fog.hpp
         src/water/WaterView.cpp
         src/water/WaterView.hpp
 )

@@ -9,6 +9,7 @@
 #include <functional>
 
 #include "entity/GridSink.hpp"
+#include "game/Fog.hpp"
 #include "game/Light.hpp"
 #include "game/ViewNode.hpp"
 #include "voxel/VoxelBrickAtlas.hpp"
@@ -77,6 +78,9 @@ public:
     VoxelBrickAtlas grid_atlas;
 
     raylib::Camera camera;
+    // The fog the scene fades into, read every frame. Borrowed (global::fog),
+    // and no fog while it is null.
+    const Fog* fog = nullptr;
     // Scales how fast the movement keys (WASD, F/C) carry the camera, from 24
     // units a second at 1. Turning (Q/E) keeps its own speed. Edited in the
     // game settings menu.
@@ -139,6 +143,8 @@ private:
     int world_to_volume_loc{-1};
     int volume_size_loc{-1};
     int world_coarse_loc{-1};
+    int fog_colour_loc{-1};
+    int fog_range_loc{-1};
     int grid_atlas_loc{-1};
     int grid_volume_count_loc{-1};
     int grid_volume_matrix_loc[MAX_GRID_VOLUMES]{};
