@@ -21,6 +21,12 @@ make help       # the rest
 make tests CTESTFLAGS="-R attach"   # only the tests whose name matches
 ```
 
+The default build type is **RelWithDebInfo** (the Makefile's `BUILD_TYPE`, and
+CMake's own default in `CMakeLists.txt` when none is given): a Debug build of
+the game and of raylib is several times slower at meshing and drawing.
+`make BUILD_TYPE=Debug` for stepping through code; changing the type
+configures again on its own (a `.configured-<type>` stamp in `build/`).
+
 `make run` starts the game from inside `build/`, not from `build/bin/`. That is
 deliberate: `main.cpp` loads its shaders from `"../resources/shaders/..."`, which
 only resolves to the repository's `resources/` when the working directory is one

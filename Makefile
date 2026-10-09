@@ -8,7 +8,10 @@
 # CMake generates its own makefiles inside $(BUILD_DIR); this one only drives it.
 
 BUILD_DIR ?= build
-BUILD_TYPE ?= Debug
+# Optimised, with debug info kept so a debugger still works. A Debug build of
+# the game and of raylib runs the meshing and the draw loop several times
+# slower; ask for one when stepping through code: make BUILD_TYPE=Debug
+BUILD_TYPE ?= RelWithDebInfo
 
 # One job per core, however the platform counts them
 JOBS ?= $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
@@ -24,15 +27,22 @@ all: run
 
 # --- Configuring ---
 
-$(BUILD_DIR)/CMakeCache.txt:
-	cmake -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
+# A stamp per build type, so changing BUILD_TYPE (or the default above)
+# configures again rather than quietly building with the cached one
+CONFIGURED := $(BUILD_DIR)/.configured-$(BUILD_TYPE)
 
-configure: $(BUILD_DIR)/CMakeCache.txt
+$(CONFIGURED):
+	cmake -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
+	@rm -f $(BUILD_DIR)/.configured-*
+	@touch $@
+
+configure: $(CONFIGURED)
 
 # For when the cache itself is the problem
 reconfigure:
-	rm -rf $(BUILD_DIR)/CMakeCache.txt $(BUILD_DIR)/CMakeFiles
+	rm -rf $(BUILD_DIR)/CMakeCache.txt $(BUILD_DIR)/CMakeFiles $(BUILD_DIR)/.configured-*
 	cmake -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
+	@touch $(CONFIGURED)
 
 # --- The game ---
 

@@ -1,4 +1,13 @@
 cmake_minimum_required(VERSION 4.0)
+
+# Optimised with debug info unless asked otherwise, the same default the
+# Makefile has: a Debug build of the game and of raylib (which follows this) is
+# several times slower at meshing and drawing. -DCMAKE_BUILD_TYPE=Debug for
+# stepping through code. Multi-config generators pick their own.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Debug, Release, RelWithDebInfo or MinSizeRel" FORCE)
+endif()
+
 project(business_game)
 include(FetchContent)
 
