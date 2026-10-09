@@ -332,6 +332,11 @@ void VoxelView::add_grid_removal_listener(GridRemovalListener listener) {
 void VoxelView::drawVoxelScene() {
     for (VoxelGrid* grid : voxel_grids) {
         for (ModelInfo* model_info : grid->get_models()) {
+            // SingleChunkGrid reports a null model until it has been meshed,
+            // which is the case for one frame when a grid is added after this
+            // view's update has run (the editor's "New Grid" does this). A
+            // model out of render distance is still listed, switched off.
+            if (model_info == nullptr || !model_info->do_render) continue;
             drawVoxelModel(grid, *model_info);
         }
     }

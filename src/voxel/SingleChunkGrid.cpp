@@ -66,6 +66,8 @@ void SingleChunkGrid::update_models() {
 
             was_updated = false;
         }
+        // Back in range after having been out of it, which switched it off below
+        if (model.has_value()) model->do_render = true;
     } else if (model.has_value()) {
         model->do_render = false;
     }
