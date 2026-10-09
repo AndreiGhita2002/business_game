@@ -575,8 +575,9 @@ and saved in `CORE`. Nothing in the simulation reads it yet.
   is what hides water behind a hill, and anything see-through goes last.
 - The view reads the level through `level_source` (set in `main.cpp` to the
   simulation's) every frame, and the surface is at `level + 1 -
-  WATER_SURFACE_INSET` in the terrain's Y. The inset keeps it out of the plane
-  of a column whose ground top is at the same height, which would z-fight.
+  WATER_SURFACE_INSET` (0.25) in the terrain's Y. The inset keeps it out of the plane
+  of a column whose ground top is at the same height, which would z-fight,
+  and leaves the waves' crests room under that plane.
 - **Attached to the terrain.** The chunks are laid out in the map's own model
   space (X = grid x, Y = grid z, Z = grid y, the mesher's space) and drawn
   through `terrain_matrix`, which `main.cpp` sets to
@@ -597,7 +598,7 @@ and saved in `CORE`. Nothing in the simulation reads it yet.
   displaced waves later. `visible_chunk_count()` says how many passed.
 - Its own shader, `resources/shaders/water.vs/.fs`, loaded with `LoadShader()`
   (no patching). The fragment half outputs `waterColour` (`WaterView::colour`,
-  alpha honoured, slightly translucent by default). Back face culling is off
+  alpha honoured, 0.7 by default so the ground shows through). Back face culling is off
   while it draws, as the camera can go under the plane.
 - **Waves** are made in the vertex half: each vertex is lifted by
   `amplitude * sin(2 pi r / length - 2 pi t / period)`, `r` its distance from
@@ -610,7 +611,7 @@ and saved in `CORE`. Nothing in the simulation reads it yet.
   **change the two together**. The time is frame time, so the waves keep
   moving while the game is paused, wrapped once a period so the sine never
   loses precision. `wave_amplitude` / `wave_length` / `wave_period` on the view
-  default to 0.1, 8 and 3 s; the amplitude is static_asserted under
+  default to 0.2, 8 and 3 s; the amplitude is static_asserted under
   `WATER_SURFACE_INSET` (a crest never reaches the next voxel layer) and
   `WATER_BOUNDS_MARGIN` (the culling never clips a crest).
 - The shader is owned by the material: `UnloadMaterial()` in the destructor

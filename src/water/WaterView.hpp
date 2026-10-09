@@ -22,7 +22,9 @@
 // How far below the top of its voxel layer the water's surface sits, so that
 // it is never in the same plane as the top of a column whose ground is at the
 // water level, which would flicker as the two fought over the depth buffer.
-#define WATER_SURFACE_INSET 0.125f
+// A quarter, so the waves have room to rise without a crest reaching that
+// plane either (see WATER_WAVE_AMPLITUDE).
+#define WATER_SURFACE_INSET 0.25f
 
 // How far above and below the surface a chunk's box reaches when it is tested
 // against the camera: room for the waves the vertex shader makes, so the
@@ -33,7 +35,7 @@
 // The waves' defaults. Kept under WATER_SURFACE_INSET, so a crest never
 // reaches the top of the voxel layer the water fills and fights the ground
 // there for the depth buffer.
-#define WATER_WAVE_AMPLITUDE 0.1f   // voxels, either side of the surface
+#define WATER_WAVE_AMPLITUDE 0.2f   // voxels, either side of the surface
 #define WATER_WAVE_LENGTH 8.0f      // voxels, crest to crest
 #define WATER_WAVE_PERIOD 3.0f      // seconds for a crest to move one wavelength
 static_assert(WATER_WAVE_AMPLITUDE < WATER_SURFACE_INSET, "a crest would reach the next voxel layer");
@@ -114,8 +116,9 @@ public:
     // each chunk's own offset. Asked every frame. Until it is set the terrain
     // is taken to be at the world origin.
     std::function<Matrix()> terrain_matrix;
-    // Handed to the shader as `waterColour`. The alpha is honoured.
-    Color colour{40, 110, 200, 200};
+    // Handed to the shader as `waterColour`. The alpha is honoured: 179 is
+    // 0.7, so the ground under the water shows through.
+    Color colour{40, 110, 200, 179};
 
     // The waves, see water_wave_height(). Read every frame. Keep the amplitude
     // under WATER_SURFACE_INSET and WATER_BOUNDS_MARGIN, as the defaults are.
