@@ -211,11 +211,12 @@ float light_visibility(int i, vec3 N, out int steps) {
 void main() {
     // Base terms
     vec4 texelColor = texture(texture0, fragTexCoord);
-    // The vertex colour carries the ambient occlusion VoxelMesher baked into
-    // the mesh, 1.0 open and lower in a corner, rather than a tint of its own.
-    // That is why it is no longer multiplied into the material colour here.
-    float ao        = fragColor.r;
-    vec4 tint       = colDiffuse;
+    // The vertex colour carries both things VoxelMesher baked into the mesh:
+    // the voxel's colour in rgb (a chunk is one mesh of every colour in it,
+    // so the material is white) and the ambient occlusion in alpha, 1.0 open
+    // and lower in a corner. The alpha is a shade, not transparency.
+    float ao        = fragColor.a;
+    vec4 tint       = colDiffuse * vec4(fragColor.rgb, 1.0);
     vec3 N          = normalize(fragNormal);
     vec3 V          = normalize(viewPos - fragPosition);
 

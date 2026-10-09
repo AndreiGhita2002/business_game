@@ -288,8 +288,8 @@ void VoxelMap::update_models() {
             side_solid(1, 1, 2, 2, 0) && side_solid(1, 1, 0, 2, CHUNK_SIZE - 1);
 
         Model new_model = buried
-            ? build_chunk_model({}, *voxel_colours)
-            : build_chunk_model(build_chunk_mesh(chunk, neighbour, Vector3{0.0, 0.0, 0.0}, 1.0f), *voxel_colours);
+            ? build_chunk_model(Mesh{})
+            : build_chunk_model(build_chunk_mesh(chunk, neighbour, *voxel_colours, Vector3{0.0, 0.0, 0.0}, 1.0f));
 
         // A chunk that is meshed again already holds a model, which would
         // leak its GPU buffers if it were simply overwritten. This happens

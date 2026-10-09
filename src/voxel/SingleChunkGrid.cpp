@@ -51,8 +51,8 @@ void SingleChunkGrid::update_models() {
         if (was_updated) {
             // No sampler: a single chunk grid has no neighbouring chunks, so
             // everything outside it is air and every outward face is drawn.
-            auto meshes = build_chunk_mesh(data, {}, Vector3{0.0,0.0,0.0}, 1.0f);
-            auto new_model = build_chunk_model(meshes, *voxel_colours);
+            auto new_model = build_chunk_model(
+                build_chunk_mesh(data, {}, *voxel_colours, Vector3{0.0,0.0,0.0}, 1.0f));
 
             // The previous model would leak its GPU buffers otherwise, and the
             // editor meshes this grid again on every voxel it places

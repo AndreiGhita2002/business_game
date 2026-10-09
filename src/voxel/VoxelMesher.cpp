@@ -5,7 +5,6 @@
 #include "voxel/VoxelMesher.hpp"
 #include <raylib.h>
 #include <array>
-#include <unordered_map>
 #include <vector>
 #include <cstring> // memcpy
 #include <raymath.h>
@@ -51,12 +50,14 @@ int vertex_ao(const bool side1, const bool side2, const bool corner) {
     return 3 - (static_cast<int>(side1) + static_cast<int>(side2) + static_cast<int>(corner));
 }
 
-std::vector<MaterialMeshData>
-build_chunk_mesh_data(const VoxelChunk& chunk, const VoxelNeighbourSampler& neighbour,
-                      const Vector3 origin, const float voxelSize) {
-    //TODO (optimisation)
-    // the chunk mesher could be massively improved if it was switched to a greedy algorithm
+Color palette_colour(const std::map<VoxelID, Color>& palette, const VoxelID id) {
+    const auto it = palette.find(id);
+    return it != palette.end() ? it->second : PURPLE;
+}
 
+ChunkMeshData build_chunk_mesh_data(const VoxelChunk& chunk, const VoxelNeighbourSampler& neighbour,
+                                    const std::map<VoxelID, Color>& palette,
+                                    const Vector3 origin, const float voxelSize) {
     // Neighbor directions in MAP space (x,y,z), and their normals in WORLD space
     struct Dir { int dx, dy, dz; Vector3 nWorld; };
     const Dir dirs[6] = {
@@ -105,18 +106,23 @@ build_chunk_mesh_data(const VoxelChunk& chunk, const VoxelNeighbourSampler& neig
         return padded[paddedIdx(x, y, z)] != 0;
     };
 
-    // Accumulate per material id
-    std::unordered_map<VoxelID, MaterialMeshData> byMat;
-    byMat.reserve(8);
+    // Each id's colour, looked up once per mesh rather than once per face
+    std::array<Color, 256> colours{};
+    std::array<bool, 256> coloured{};
 
-    auto emitFace = [&](MaterialMeshData& A, int x, int y, int z, int f) {
-        const float bx = static_cast<float>(x);
-        const float by = static_cast<float>(y);
-        const float bz = static_cast<float>(z);
+    ChunkMeshData A;
+    {
+        // Room for a typical surface chunk's worth of quads up front
+        constexpr size_t QUADS = 256;
+        A.vertices.reserve(QUADS * 12);
+        A.normals.reserve(QUADS * 12);
+        A.uvs.reserve(QUADS * 8);
+        A.colors.reserve(QUADS * 16);
+        A.indices.reserve(QUADS * 6);
+    }
 
-        const size_t baseIndex = A.vertices.size() / 3;
-
-        // The axis the face looks along, and the two that lie in its plane
+    // The AO of each corner of face f of the voxel at (x, y, z), in corner order
+    const auto face_ao = [&](const int x, const int y, const int z, const int f, int ao[4]) {
         const int faceAxis = f / 2;
         const int axisU = (faceAxis + 1) % 3;
         const int axisV = (faceAxis + 2) % 3;
@@ -125,30 +131,8 @@ build_chunk_mesh_data(const VoxelChunk& chunk, const VoxelNeighbourSampler& neig
         // looks around itself
         const int front[3] = {x + dirs[f].dx, y + dirs[f].dy, z + dirs[f].dz};
 
-        int ao[4] = {3, 3, 3, 3};
-
         for (int i = 0; i < 4; ++i) {
             const Vector3 cm = faceCornersMap[f][i];
-            const float mx = bx + cm.x;
-            const float my = by + cm.y;
-            const float mz = bz + cm.z;
-
-            // Map (x,y,z_map) -> World (X=x, Y=z_map, Z=y)
-            const float wx = origin.x + mx * voxelSize;
-            const float wy = origin.y + mz * voxelSize; // up
-            const float wz = origin.z + my * voxelSize;
-
-            A.vertices.push_back(wx);
-            A.vertices.push_back(wy);
-            A.vertices.push_back(wz);
-
-            A.normals.push_back(dirs[f].nWorld.x);
-            A.normals.push_back(dirs[f].nWorld.y);
-            A.normals.push_back(dirs[f].nWorld.z);
-
-            A.uvs.push_back(faceUV[i*2 + 0]);
-            A.uvs.push_back(faceUV[i*2 + 1]);
-
             // Which way this corner sits in the face's own plane. The corner
             // offsets are 0 or 1 on each axis, so a 1 is the far side.
             const int stepU = axisValue(cm, axisU) > 0.5f ? 1 : -1;
@@ -166,165 +150,200 @@ build_chunk_mesh_data(const VoxelChunk& chunk, const VoxelNeighbourSampler& neig
                 solid_at(side1[0], side1[1], side1[2]),
                 solid_at(side2[0], side2[1], side2[2]),
                 solid_at(corner[0], corner[1], corner[2]));
+        }
+    };
 
-            const auto shade = static_cast<unsigned char>(AO_SHADE[ao[i]] * 255.0f);
-            A.colors.push_back(shade);
-            A.colors.push_back(shade);
-            A.colors.push_back(shade);
-            A.colors.push_back(255);
+    // A quad for face f of the voxel at (x, y, z), stretched to `w` voxels
+    // along the face's U axis and `h` along its V axis (1 by 1 is one face),
+    // coloured `colour` with the corner shades in `ao`
+    const auto emit_quad = [&](const int x, const int y, const int z, const int f, const int w, const int h,
+                               const Color colour, const int ao[4]) {
+        const size_t baseIndex = A.vertices.size() / 3;
+        const int faceAxis = f / 2;
+        const int axisU = (faceAxis + 1) % 3;
+        const int axisV = (faceAxis + 2) % 3;
+
+        for (int i = 0; i < 4; ++i) {
+            const Vector3 cm = faceCornersMap[f][i];
+            // The far corners along U and V are moved out to the end of the
+            // merged run; the axis the face looks along keeps its 0 or 1
+            float m[3] = {static_cast<float>(x) + cm.x, static_cast<float>(y) + cm.y, static_cast<float>(z) + cm.z};
+            if (axisValue(cm, axisU) > 0.5f) m[axisU] += static_cast<float>(w - 1);
+            if (axisValue(cm, axisV) > 0.5f) m[axisV] += static_cast<float>(h - 1);
+
+            // Map (x,y,z_map) -> World (X=x, Y=z_map, Z=y)
+            A.vertices.push_back(origin.x + m[0] * voxelSize);
+            A.vertices.push_back(origin.y + m[2] * voxelSize); // up
+            A.vertices.push_back(origin.z + m[1] * voxelSize);
+
+            A.normals.push_back(dirs[f].nWorld.x);
+            A.normals.push_back(dirs[f].nWorld.y);
+            A.normals.push_back(dirs[f].nWorld.z);
+
+            A.uvs.push_back(faceUV[i*2 + 0]);
+            A.uvs.push_back(faceUV[i*2 + 1]);
+
+            A.colors.push_back(colour.r);
+            A.colors.push_back(colour.g);
+            A.colors.push_back(colour.b);
+            A.colors.push_back(static_cast<unsigned char>(AO_SHADE[ao[i]] * 255.0f));
         }
 
         // Which way the quad is split matters once its corners differ: the
         // shade is interpolated across each triangle, so the wrong diagonal
         // leaves a crease running the other way. Splitting along the darker
         // diagonal is the usual rule (0fps.net's flipped quad).
+        const auto at = [baseIndex](const int k) { return static_cast<unsigned short>(baseIndex + k); };
         if (ao[0] + ao[2] > ao[1] + ao[3]) {
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 1));
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 2));
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 3));
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 1));
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 3));
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 0));
+            for (const int k : {1, 2, 3, 1, 3, 0}) A.indices.push_back(at(k));
         } else {
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 0));
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 1));
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 2));
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 0));
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 2));
-            A.indices.push_back(static_cast<unsigned short>(baseIndex + 3));
+            for (const int k : {0, 1, 2, 0, 2, 3}) A.indices.push_back(at(k));
         }
     };
 
-    // Walk voxels: add faces only when the neighbor is AIR (0), which now
-    // includes the neighbour in the next chunk along
-    for (int z = 0; z < CHUNK_SIZE; ++z) {
-        for (int y = 0; y < CHUNK_SIZE; ++y) {
-            for (int x = 0; x < CHUNK_SIZE; ++x) {
-                VoxelID v = chunk[idx(x,y,z)];
-                if (v == 0) continue; // air
+    // Every face, a direction and a slice at a time. A slice's faces go into a
+    // mask, a 16 by 16 grid across the face's U and V axes, keyed by colour
+    // and shade; a face whose four corners are not all one shade is emitted
+    // straight away and left out of the mask, as it cannot be merged without
+    // changing how it is shaded. The rest are merged greedily: a run along U,
+    // grown along V for as long as every face in the next row matches.
+    //
+    // A chunk is at most 16^3 voxels, half of them showing six unmerged faces
+    // in the worst case (a checkerboard), which is 49152 vertices: inside the
+    // 65536 an unsigned short index reaches.
+    constexpr uint32_t NO_FACE = 0;
+    std::array<uint32_t, CHUNK_SIZE * CHUNK_SIZE> mask{};
+    for (int f = 0; f < 6; ++f) {
+        const int faceAxis = f / 2;
+        const int axisU = (faceAxis + 1) % 3;
+        const int axisV = (faceAxis + 2) % 3;
 
-                // Looked up once for the voxel, and only once it has a face
-                MaterialMeshData* A = nullptr;
-                for (int f = 0; f < 6; ++f) {
-                    const int nx = x + dirs[f].dx;
-                    const int ny = y + dirs[f].dy;
-                    const int nz = z + dirs[f].dz;
+        for (int s = 0; s < CHUNK_SIZE; ++s) {
+            mask.fill(NO_FACE);
+            for (int j = 0; j < CHUNK_SIZE; ++j) {
+                for (int i = 0; i < CHUNK_SIZE; ++i) {
+                    int p[3];
+                    p[faceAxis] = s;
+                    p[axisU] = i;
+                    p[axisV] = j;
 
-                    if (!solid_at(nx, ny, nz)) {
-                        if (A == nullptr) {
-                            A = &byMat[v];
-                            if (A->vertices.empty()) {
-                                // Room for a chunk's worth of faces up front,
-                                // rather than growing a face at a time
-                                constexpr size_t FACES = 256;
-                                A->id = v;
-                                A->vertices.reserve(FACES * 12);
-                                A->normals.reserve(FACES * 12);
-                                A->uvs.reserve(FACES * 8);
-                                A->colors.reserve(FACES * 16);
-                                A->indices.reserve(FACES * 6);
-                            }
-                        }
-                        emitFace(*A, x, y, z, f);
+                    const VoxelID v = chunk[idx(p[0], p[1], p[2])];
+                    if (v == 0) continue; // air
+                    if (solid_at(p[0] + dirs[f].dx, p[1] + dirs[f].dy, p[2] + dirs[f].dz)) continue;
+
+                    if (!coloured[v]) {
+                        colours[v] = palette_colour(palette, v);
+                        coloured[v] = true;
                     }
+
+                    int ao[4];
+                    face_ao(p[0], p[1], p[2], f, ao);
+                    if (ao[0] != ao[1] || ao[0] != ao[2] || ao[0] != ao[3]) {
+                        emit_quad(p[0], p[1], p[2], f, 1, 1, colours[v], ao);
+                        continue;
+                    }
+                    // id in the low byte, the shade above it, and a bit so a
+                    // face is never the same as no face
+                    mask[i + j * CHUNK_SIZE] = 0x10000u | (static_cast<uint32_t>(ao[0]) << 8) | v;
+                }
+            }
+
+            for (int j = 0; j < CHUNK_SIZE; ++j) {
+                for (int i = 0; i < CHUNK_SIZE;) {
+                    const uint32_t key = mask[i + j * CHUNK_SIZE];
+                    if (key == NO_FACE) { ++i; continue; }
+
+                    int w = 1;
+                    while (i + w < CHUNK_SIZE && mask[i + w + j * CHUNK_SIZE] == key) ++w;
+                    int h = 1;
+                    for (bool grow = true; grow && j + h < CHUNK_SIZE;) {
+                        for (int k = 0; k < w; ++k) {
+                            if (mask[i + k + (j + h) * CHUNK_SIZE] != key) { grow = false; break; }
+                        }
+                        if (grow) ++h;
+                    }
+
+                    int p[3];
+                    p[faceAxis] = s;
+                    p[axisU] = i;
+                    p[axisV] = j;
+                    const int shade = static_cast<int>((key >> 8) & 0xFFu);
+                    const int ao[4] = {shade, shade, shade, shade};
+                    emit_quad(p[0], p[1], p[2], f, w, h, colours[key & 0xFFu], ao);
+
+                    for (int dj = 0; dj < h; ++dj) {
+                        for (int k = 0; k < w; ++k) mask[i + k + (j + dj) * CHUNK_SIZE] = NO_FACE;
+                    }
+                    i += w;
                 }
             }
         }
     }
 
-    std::vector<MaterialMeshData> result;
-    result.reserve(byMat.size());
-    for (auto& [id, data] : byMat) result.push_back(std::move(data));
-    return result;
+    return A;
 }
 
-std::vector<MaterialMesh> upload_chunk_mesh(const std::vector<MaterialMeshData>& data) {
-    std::vector<MaterialMesh> result;
-    result.reserve(data.size());
+Mesh upload_chunk_mesh(const ChunkMeshData& A) {
+    Mesh mesh = {0};
+    if (A.empty()) return mesh;
 
-    for (const MaterialMeshData& A : data) {
-        Mesh mesh = {0};
-        mesh.vertexCount   = static_cast<int>(A.vertices.size() / 3);
-        mesh.triangleCount = static_cast<int>(A.indices.size() / 3);
+    mesh.vertexCount   = static_cast<int>(A.vertices.size() / 3);
+    mesh.triangleCount = static_cast<int>(A.indices.size() / 3);
 
-        if (!A.vertices.empty()) {
-            mesh.vertices = (float*)MemAlloc(A.vertices.size() * sizeof(float));
-            std::memcpy(mesh.vertices, A.vertices.data(), A.vertices.size() * sizeof(float));
-        }
-        if (!A.normals.empty()) {
-            mesh.normals = (float*)MemAlloc(A.normals.size() * sizeof(float));
-            std::memcpy(mesh.normals, A.normals.data(), A.normals.size() * sizeof(float));
-        }
-        if (!A.uvs.empty()) {
-            mesh.texcoords = (float*)MemAlloc(A.uvs.size() * sizeof(float));
-            std::memcpy(mesh.texcoords, A.uvs.data(), A.uvs.size() * sizeof(float));
-        }
-        // The ambient occlusion rides in the vertex colours, which the lighting
-        // shader reads as a shade rather than as a tint. See lighting.fs.
-        if (!A.colors.empty()) {
-            mesh.colors = (unsigned char*)MemAlloc(A.colors.size() * sizeof(unsigned char));
-            std::memcpy(mesh.colors, A.colors.data(), A.colors.size() * sizeof(unsigned char));
-        }
-        if (!A.indices.empty()) {
-            mesh.indices = (unsigned short*)MemAlloc(A.indices.size() * sizeof(unsigned short));
-            std::memcpy(mesh.indices, A.indices.data(), A.indices.size() * sizeof(unsigned short));
-        }
+    const auto copy = [](const auto& v) {
+        using T = typename std::decay_t<decltype(v)>::value_type;
+        auto* out = static_cast<T*>(MemAlloc(static_cast<unsigned int>(v.size() * sizeof(T))));
+        std::memcpy(out, v.data(), v.size() * sizeof(T));
+        return out;
+    };
+    mesh.vertices = copy(A.vertices);
+    mesh.normals = copy(A.normals);
+    mesh.texcoords = copy(A.uvs);
+    // The colour and the ambient occlusion ride in the vertex colours, which
+    // the lighting shader reads as a colour and a shade. See lighting.fs.
+    mesh.colors = copy(A.colors);
+    mesh.indices = copy(A.indices);
 
-        UploadMesh(&mesh, false); // static by default
+    UploadMesh(&mesh, false); // static by default
 
-        // The GPU has its own copy now. Only the vertices and indices are
-        // read on the CPU again (picking, and the box round a selected grid),
-        // so the rest goes, which is over half of what a chunk keeps in RAM.
-        // UnloadMesh() skips a null array.
-        MemFree(mesh.normals);
-        MemFree(mesh.texcoords);
-        MemFree(mesh.colors);
-        mesh.normals = nullptr;
-        mesh.texcoords = nullptr;
-        mesh.colors = nullptr;
+    // The GPU has its own copy now. Only the vertices and indices are read on
+    // the CPU again (the box round a selected grid), so the rest goes, which
+    // is over half of what a chunk keeps in RAM. UnloadMesh() skips a null
+    // array.
+    MemFree(mesh.normals);
+    MemFree(mesh.texcoords);
+    MemFree(mesh.colors);
+    mesh.normals = nullptr;
+    mesh.texcoords = nullptr;
+    mesh.colors = nullptr;
 
-        result.push_back(MaterialMesh{ A.id, mesh });
-    }
-
-    return result;
+    return mesh;
 }
 
-std::vector<MaterialMesh>
-build_chunk_mesh(const VoxelChunk& chunk, const VoxelNeighbourSampler& neighbour,
-                 const Vector3 origin, const float voxelSize) {
-    return upload_chunk_mesh(build_chunk_mesh_data(chunk, neighbour, origin, voxelSize));
+Mesh build_chunk_mesh(const VoxelChunk& chunk, const VoxelNeighbourSampler& neighbour,
+                      const std::map<VoxelID, Color>& palette, const Vector3 origin, const float voxelSize) {
+    return upload_chunk_mesh(build_chunk_mesh_data(chunk, neighbour, palette, origin, voxelSize));
 }
 
-Model build_chunk_model(const std::vector<MaterialMesh> &mats, const std::map<VoxelID, Color> &voxelColourMap) {
+Model build_chunk_model(const Mesh mesh) {
     Model model = {0};
     model.transform = MatrixIdentity();
 
-    const int n = (int)mats.size();
-    if (n == 0) return model; // empty chunk → empty model
+    if (mesh.vertexCount == 0) return model; // empty chunk → empty model
 
-    // 1) Attach meshes (each entry already has GPU buffers)
-    model.meshCount = n;
-    model.meshes = (Mesh*)MemAlloc(sizeof(Mesh) * n);
-    for (int i = 0; i < n; ++i) {
-        model.meshes[i] = mats[i].mesh;  // transfer ownership to the model
-    }
+    model.meshCount = 1;
+    model.meshes = static_cast<Mesh*>(MemAlloc(sizeof(Mesh)));
+    model.meshes[0] = mesh;  // ownership passes to the model
 
-    // 2) Create materials (one per mesh, colored by VoxelID)
-    model.materialCount = n;
-    model.materials = (Material*)MemAlloc(sizeof(Material) * n);
-    for (int i = 0; i < n; ++i) {
-        model.materials[i] = LoadMaterialDefault();
-        Color c = PURPLE;
-        if (auto it = voxelColourMap.find(mats[i].id); it != voxelColourMap.end())
-            c = it->second;
+    // White: the colours are in the vertices, and the shader multiplies this in
+    model.materialCount = 1;
+    model.materials = static_cast<Material*>(MemAlloc(sizeof(Material)));
+    model.materials[0] = LoadMaterialDefault();
+    model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+    model.materials[0].shader = global::voxel_shader;
 
-        model.materials[i].maps[MATERIAL_MAP_DIFFUSE].color = c;
-        model.materials[i].shader = global::voxel_shader;
-    }
-
-    // 3) Map each mesh to its material
-    model.meshMaterial = (int*)MemAlloc(sizeof(int) * n);
-    for (int i = 0; i < n; ++i) model.meshMaterial[i] = i;
+    model.meshMaterial = static_cast<int*>(MemAlloc(sizeof(int)));
+    model.meshMaterial[0] = 0;
 
     return model;
 }

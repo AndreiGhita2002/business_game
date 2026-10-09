@@ -364,12 +364,22 @@ The UI/scene uses a `ViewNode` tree hierarchy with recursive update/render trave
 - **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks keyed by `Int3`), any number of chunks tall (`get_height()`; the game's is 256 voxels, 16 chunks), the size of the whole world (2560 voxels across by default). **Sparse**: a chunk only exists once something is written to it (`ensure_chunk()`, which `write_voxel()` calls; air into a missing chunk does nothing), and `get_voxel()` is null where there is none, so read through `is_solid()` or check for null. `clear()` drops every chunk and its model, `resize()` is a new size of air. It starts as air: the terrain is the simulation's, drawn in by `entity/TerrainVoxels`. A write on a chunk's border remeshes only the neighbours that exist. `update_models()` visits only the chunks marked in `chunk_was_updated` (and every model only when the render distance is limited), looks a chunk's 26 neighbours up once rather than per voxel, counts **below the map as solid** (so the underside is never meshed), and gives a chunk that is solid all through with solid on all six sides an empty model without running the mesher - most of an island. `solid_top()` is one pass over the chunks.
 - **SingleChunkGrid** (`src/voxel/SingleChunkGrid.cpp/hpp`) - Single chunk for the voxel editor
 
-**VoxelMesher** (`src/voxel/VoxelMesher.cpp/hpp`) converts voxel data to 3D
-meshes with per-material generation.
+**VoxelMesher** (`src/voxel/VoxelMesher.cpp/hpp`) converts a chunk into **one
+mesh**, every colour in it: a vertex carries its voxel's palette colour in rgb
+and its ambient occlusion shade in alpha (`ChunkMeshData`), so a chunk is one
+draw call. `build_chunk_model(Mesh)` gives it one white material on the voxel
+shader; an id the palette lacks is purple (`palette_colour()`). A palette
+change therefore means remeshing.
 
 - `build_chunk_mesh_data()` is the CPU half and needs no OpenGL context, which
   is what lets the tests cover it. `upload_chunk_mesh()` is the half that does.
   `build_chunk_mesh()` is still the two together.
+- **Greedy meshing**: a direction and a slice at a time, faces go into a 16x16
+  mask keyed by colour and shade and are merged into the largest rectangles
+  they make. Only faces whose four corners share one shade are merged; a face
+  with a shade gradient (next to an occluder) is emitted on its own, so the
+  shading is exactly what one quad per face gave. Merged quads meet at
+  T-junctions, which can show as the odd lit pixel along a seam.
 - It takes a `VoxelNeighbourSampler`, which answers what sits one voxel outside
   the chunk. The chunk is copied into an 18x18x18 padded array first, so a
   lookup across a border is an ordinary array read. A face against a solid
@@ -382,8 +392,9 @@ meshes with per-material generation.
   levels, so changing it means remeshing.
 - After upload only the vertices and indices stay in RAM (picking and the
   selection boxes read them); normals, UVs and colours are freed.
-- The colours are a shade, not a tint. `lighting.fs` reads `fragColor.r` as the
-  occlusion and no longer multiplies the vertex colour into the material.
+- `lighting.fs` reads `fragColor.rgb` as the colour (multiplied into the white
+  material) and `fragColor.a` as the occlusion; the alpha is a shade, not
+  transparency.
 
 **VoxelVolume** (`src/voxel/VoxelVolume.cpp/hpp`) - The same voxels as a 3D
 texture, one byte each, for the lighting shader to trace shadow rays through.
@@ -880,7 +891,6 @@ take the narrow header instead of dragging in the window and the view tree.
 
 ## Known Issues (from TODOs in code)
 
-- Greedy meshing optimization not yet implemented
 - VoxelGrid model vector recreated on every call (VoxelGrid.hpp:71)
 - A placeholder car is five grids, so it takes five shadow atlas slots (256 in
   all) and five of a draw call's `MAX_GRID_VOLUMES` (8) casters. Two cars side
