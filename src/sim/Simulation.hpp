@@ -92,11 +92,18 @@ public:
     /**
      * The whole state as bytes, in a fixed order. The checksum is taken over
      * this, so anything left out of it is invisible to desync checks.
-     * Saving will be built on it; there is no reading it back yet.
+     *
+     * A saved game (sim/Save.hpp) writes the same systems with the same
+     * writers, a section each, so the two cannot disagree about what the
+     * state is.
      */
     void write_state(ByteWriter& out) const;
 
 private:
+    // The one thing outside a command allowed to change the world: reading a
+    // saved game back into it, see sim/Save.cpp
+    friend class SaveAccess;
+
     World world;
 };
 

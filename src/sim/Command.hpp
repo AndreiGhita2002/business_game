@@ -171,6 +171,15 @@ public:
 
     size_t pending() const { return queued.size(); }
 
+    /**
+     * The queue as it stands - every command still waiting, and the next
+     * sequence number - so a saved game carries the commands that had not run
+     * yet and runs them on the first tick after it is loaded.
+     */
+    void write(ByteWriter& out) const;
+    /** Replaces the queue with what write() wrote. On a refusal it is left empty. */
+    bool read(ByteReader& in);
+
 private:
     std::vector<StampedCommand> queued;
     uint32_t next_sequence = 0;

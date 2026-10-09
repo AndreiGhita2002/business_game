@@ -19,6 +19,7 @@
 #include "voxel/VoxelView.hpp"
 #include "voxel/VoxelMap.hpp"
 #include "sim/Command.hpp"
+#include "sim/Save.hpp"
 #include "sim/Simulation.hpp"
 
 namespace global {
@@ -46,6 +47,11 @@ namespace global {
     inline float game_speed = 1.0f;
     // How many ticks the last frame ran, for the debug readout
     inline int ticks_last_frame = 0;
+
+    // A line the readout shows for a few seconds, such as how a save went
+    inline std::string status_message;
+    inline float status_seconds_left = 0.0f;
+    void show_status(const std::string& message);
 
     // --- Presentation of the simulation ---
     // What a vehicle's model name looks like, and the entities drawn for the

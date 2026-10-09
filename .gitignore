@@ -42,3 +42,6 @@ build/
 
 # claude worktrees
 /.claude/worktrees/
+
+# quicksaves the game writes, see QUICKSAVE_PATH in main.cpp
+/saves/

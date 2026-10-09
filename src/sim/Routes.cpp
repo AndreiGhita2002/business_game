@@ -44,6 +44,12 @@ bool Routes::is_valid(const std::vector<Point>& points) {
 }
 
 std::optional<RouteId> Routes::add(std::vector<Point> points) {
+    std::optional<Route> route = build(std::move(points));
+    if (!route) return std::nullopt;
+    return pool.insert(std::move(*route));
+}
+
+std::optional<Route> Routes::build(std::vector<Point> points) {
     if (!is_valid(points)) return std::nullopt;
 
     Route route;
@@ -55,8 +61,7 @@ std::optional<RouteId> Routes::add(std::vector<Point> points) {
         route.cumulative.push_back(total);
     }
     route.points = std::move(points);
-
-    return pool.insert(std::move(route));
+    return route;
 }
 
 std::optional<RoutePose> Routes::pose_at(const RouteId id, const Fixed distance) const {
@@ -98,6 +103,23 @@ void Routes::write(ByteWriter& out) const {
         }
         // The cumulative lengths follow from the points, so they are not
         // written: the checksum would only be hashing the same thing twice
+    });
+}
+
+bool Routes::read(ByteReader& in) {
+    return pool.read(in, [](ByteReader& r, Route* route) {
+        uint32_t count = 0;
+        // Three fixed point numbers to a point
+        if (!r.read_u32(&count) || count > r.remaining() / 24) return false;
+        std::vector<Point> points(count);
+        for (Point& p : points) {
+            if (!r.read_fixed(&p.x) || !r.read_fixed(&p.y) || !r.read_fixed(&p.z)) return false;
+        }
+        // Built again rather than trusted, which also works the lengths out
+        std::optional<Route> built = build(std::move(points));
+        if (!built) return false;
+        *route = std::move(*built);
+        return true;
     });
 }
 

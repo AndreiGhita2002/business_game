@@ -56,6 +56,8 @@ public:
     void for_each(F&& f) const { pool.for_each(std::forward<F>(f)); }
 
     void write(ByteWriter& out) const;
+    /** Replaces every vehicle with what write() wrote. False on a short record. */
+    bool read(ByteReader& in);
 
 private:
     Pool<Vehicle, VehicleTag> pool;

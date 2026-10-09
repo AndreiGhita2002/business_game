@@ -67,6 +67,9 @@ public:
      */
     static bool is_valid(const std::vector<Point>& points);
 
+    /** A route through these points, lengths worked out, or nothing when is_valid() says no. */
+    static std::optional<Route> build(std::vector<Point> points);
+
     /** Adds a route, or returns nothing when is_valid() says no. */
     std::optional<RouteId> add(std::vector<Point> points);
 
@@ -85,6 +88,8 @@ public:
     void for_each(F&& f) const { pool.for_each(std::forward<F>(f)); }
 
     void write(ByteWriter& out) const;
+    /** Replaces every route with what write() wrote. False on a short or invalid record. */
+    bool read(ByteReader& in);
 
 private:
     Pool<Route, RouteTag> pool;

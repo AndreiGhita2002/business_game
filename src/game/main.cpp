@@ -42,6 +42,23 @@ constexpr int MAX_TICKS_PER_FRAME = 5;
 // The simulation's seed. Nothing random happens in it yet.
 constexpr uint64_t SIMULATION_SEED = 1;
 
+// Where F5 saves the game and F9 loads it from. Relative to build/, the same
+// way the shaders are, so it lands in the repository's saves/ folder (ignored
+// by git) rather than in build/, which `make clean` would take with it.
+//
+// TODO (ui): a save menu - named saves, a list to load from, and a warning
+//  before loading over a game that has not been saved. One quicksave file on
+//  F5 and F9 stands in until then.
+constexpr const char* QUICKSAVE_PATH = "../saves/quicksave.bgsave";
+constexpr int QUICKSAVE_KEY = KEY_F5;
+constexpr int QUICKLOAD_KEY = KEY_F9;
+
+// How long a status line stays in the readout, in seconds
+constexpr float STATUS_SECONDS = 3.0f;
+
+/** F5 saves the game, F9 loads it. */
+static void handle_save_keys();
+
 /**
  * Queues the test scenario for the architecture slice: two loops of road over
  * the map and a dozen cars on them at different speeds, two running their loop
@@ -111,10 +128,14 @@ void global::init() {
     sim_readout->font_size = 16.0f;
     sim_readout->background = ui_view->style.background;
     ui_view->add_child(std::move(sim_readout_node));
-    add_script(std::make_unique<LambdaScript>("simulation readout", [sim_readout](float) {
+    add_script(std::make_unique<LambdaScript>("simulation readout", [sim_readout](const float delta) {
         sim_readout->text = TextFormat("tick %llu  |  %d ticks this frame  |  %zu vehicles, %zu drawn",
             static_cast<unsigned long long>(simulation->tick()), ticks_last_frame,
             simulation->vehicles().size(), entities->realized_count());
+        if (status_seconds_left > 0.0f) {
+            sim_readout->text += "  |  " + status_message;
+            status_seconds_left -= delta;
+        }
     }));
 
     // Debug panel for the lighting, hidden until F3 or until its button is
@@ -265,6 +286,10 @@ void global::mainLoop() {
     const float delta = GetFrameTime();
     const float tick_length = tick_seconds();
 
+    // Between ticks, before any run this frame, so a save never catches the
+    // simulation part way through one and a load starts on a clean frame
+    handle_save_keys();
+
     // Fixed ticks out of a frame of whatever length. The accumulator holds the
     // game time not run yet; every whole tick of it is one step.
     tick_accumulator += delta * game_speed;
@@ -361,6 +386,53 @@ static void queue_test_scenario(VoxelMap* map) {
                 routes[1], inner_length * i / 4, i < 2 ? speed : -speed, colours[(i + 1) % 3]));
         }
     }));
+}
+
+void global::show_status(const std::string& message) {
+    status_message = message;
+    status_seconds_left = STATUS_SECONDS;
+}
+
+static void handle_save_keys() {
+    using namespace global;
+
+    if (IsKeyPressed(QUICKSAVE_KEY)) {
+        std::string error;
+        if (sim::save_to_file(QUICKSAVE_PATH, *simulation, commands, &error)) {
+            TraceLog(LOG_INFO, "SAVE: saved tick %llu to %s",
+                     static_cast<unsigned long long>(simulation->tick()), QUICKSAVE_PATH);
+            show_status(TextFormat("saved at tick %llu", static_cast<unsigned long long>(simulation->tick())));
+        } else {
+            TraceLog(LOG_WARNING, "SAVE: %s", error.c_str());
+            show_status("save failed: " + error);
+        }
+    }
+
+    if (IsKeyPressed(QUICKLOAD_KEY)) {
+        std::string error;
+        std::optional<sim::LoadedGame> loaded = sim::load_from_file(QUICKSAVE_PATH, &error);
+        if (!loaded) {
+            // The game carries on untouched: nothing is replaced until the
+            // whole file has read cleanly
+            TraceLog(LOG_WARNING, "LOAD: %s", error.c_str());
+            show_status("load failed: " + error);
+            return;
+        }
+
+        // Nothing on screen is saved. The entities are dropped and the next
+        // present() builds the ones near the camera again from the loaded
+        // simulation, as it would after any clear().
+        entities->clear();
+        // Assigned into the existing objects rather than replacing them, as
+        // the vehicle panel holds pointers to both
+        *simulation = std::move(loaded->simulation);
+        commands = std::move(loaded->commands);
+        tick_accumulator = 0.0f;
+
+        TraceLog(LOG_INFO, "LOAD: loaded tick %llu from %s",
+                 static_cast<unsigned long long>(simulation->tick()), QUICKSAVE_PATH);
+        show_status(TextFormat("loaded tick %llu", static_cast<unsigned long long>(simulation->tick())));
+    }
 }
 
 Script* global::add_script(std::unique_ptr<Script> script) {

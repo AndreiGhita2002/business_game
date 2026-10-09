@@ -103,6 +103,56 @@ public:
         for (const uint32_t index : free_list) out.write_u32(index);
     }
 
+    /**
+     * Replaces the pool with what write() wrote, `read_value(in, T*)` reading
+     * each object. Every handle that was valid when it was written is valid
+     * again, and the next insert lands in the same slot it would have.
+     *
+     * Refuses a free list naming a slot that is out of range, taken, or listed
+     * twice, as inserting into one would overwrite an object or hand the same
+     * slot out twice. On a refusal the pool is left empty.
+     */
+    template <typename F>
+    bool read(ByteReader& in, F&& read_value) {
+        clear();
+
+        uint32_t slot_count = 0;
+        // Every slot takes at least five bytes, so a count beyond that is
+        // corruption, and refusing it here stops it asking for gigabytes
+        if (!in.read_u32(&slot_count) || slot_count > in.remaining() / 5) return fail();
+        slots.resize(slot_count);
+
+        for (Slot& slot : slots) {
+            uint8_t taken = 0;
+            if (!in.read_u32(&slot.generation) || !in.read_u8(&taken) || taken > 1) return fail();
+            if (taken == 1) {
+                T value{};
+                if (!read_value(in, &value)) return fail();
+                slot.value = std::move(value);
+                alive++;
+            }
+        }
+
+        uint32_t free_count = 0;
+        if (!in.read_u32(&free_count) || free_count > slot_count) return fail();
+        std::vector<bool> listed(slot_count, false);
+        free_list.reserve(free_count);
+        for (uint32_t i = 0; i < free_count; ++i) {
+            uint32_t index = 0;
+            if (!in.read_u32(&index) || index >= slot_count) return fail();
+            if (slots[index].value.has_value() || listed[index]) return fail();
+            listed[index] = true;
+            free_list.push_back(index);
+        }
+        return true;
+    }
+
+    void clear() {
+        slots.clear();
+        free_list.clear();
+        alive = 0;
+    }
+
 private:
     struct Slot {
         uint32_t generation = 0;
@@ -112,6 +162,11 @@ private:
     std::vector<Slot> slots;
     std::vector<uint32_t> free_list;
     size_t alive = 0;
+
+    bool fail() {
+        clear();
+        return false;
+    }
 };
 
 } // namespace sim

@@ -73,6 +73,10 @@ needs nothing from the game side:
 - `test_sim_routes.cpp` - what makes a route, and where a distance lands on one.
 - `test_sim_simulation.cpp` - `step()`: commands in, vehicles moving, events and
   refusals out, and the (player, sequence) order.
+- `test_sim_save.cpp` - a saved game loading with the same checksum and then
+  ticking on in step with the original, queued commands running after a load,
+  identical bytes for identical games, every malformed file refused with a
+  reason, files round tripping, and `Pool::read` refusing a bad free list.
 - `test_sim_determinism.cpp` - the same game twice, a recorded log replayed, and
   the log written to bytes and replayed, all agreeing on the checksum every
   tick; and the checksum noticing a different seed, a different speed, and
@@ -150,8 +154,37 @@ Rules the simulation keeps, and that anything added to it must keep:
   and last one step; continuous state is read, not pushed.
 - `Simulation::checksum()` is FNV-1a over `write_state()`, which writes the
   whole state including the pools' slot bookkeeping. Anything left out of
-  `write_state()` is invisible to desync checks. Saving will be built on it but
-  there is no load yet - how saves should work is still to be discussed.
+  `write_state()` is invisible to desync checks.
+
+**Saved games** (`sim/Save.cpp/hpp`) hold the simulation and the commands still
+queued, and nothing from the presentation: everything on screen is rebuilt from
+the simulation after a load.
+
+- A 12 byte header (`BGSV`, `SAVE_FORMAT_VERSION`, section count), then one
+  section per system: `u32 tag, u32 version, u32 payload_bytes, payload`. The
+  sections are `CORE` (tick and Rng), `ROUT`, `VEHI` and `CMDS` (the
+  `CommandQueue`: waiting commands and the next sequence number, so they run on
+  the first tick after the load).
+- **No migration.** A section of another version, an unknown section, a
+  missing or repeated one, or a payload not read to its last byte refuses the
+  whole load with a message saying which. Bump a section's `*_VERSION` constant
+  whenever its layout changes; older saves of it then stop loading.
+- The sections are written with the same writers `write_state()` uses, and the
+  pools save their slot bookkeeping (`Pool::write` / `Pool::read`), so handles
+  stay valid across a load and a loaded game's checksum equals the saved one.
+  A new system needs a writer, a reader, a section tag and version, and an
+  entry in both `write_save()` and `read_save()`.
+- `SaveAccess` in `Save.cpp` is the only thing outside a command that writes to
+  a `World`. Routes are rebuilt through `Routes::build()` on load rather than
+  trusted, and a damaged free list is refused.
+- `save_to_file()` writes beside the target and renames over it, so a failed
+  save leaves the previous one standing.
+- In the game, F5 saves to `saves/quicksave.bgsave` (git ignored) and F9 loads
+  it, both handled at the start of `mainLoop()`, between ticks. A load is
+  assigned into the existing `global::simulation` and `global::commands`, as
+  the vehicle panel points at both, after `EntityManager::clear()`. A failed
+  load leaves the game as it was. The readout shows how either went. A save
+  menu is a `TODO (ui)` next to `QUICKSAVE_PATH`.
 
 Routes and vehicles are placeholders for testing the split: a route is a closed
 loop of segments that each run along x or y (so lengths are exact without a

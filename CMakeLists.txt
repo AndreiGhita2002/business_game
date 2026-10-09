@@ -71,6 +71,8 @@ add_library(business_game_sim STATIC
         src/sim/Rng.hpp
         src/sim/Routes.cpp
         src/sim/Routes.hpp
+        src/sim/Save.cpp
+        src/sim/Save.hpp
         src/sim/Serial.hpp
         src/sim/Simulation.cpp
         src/sim/Simulation.hpp
@@ -212,6 +214,7 @@ if(BUSINESS_GAME_BUILD_TESTS)
             src/tests/sim/test_sim_core.cpp
             src/tests/sim/test_sim_determinism.cpp
             src/tests/sim/test_sim_routes.cpp
+            src/tests/sim/test_sim_save.cpp
             src/tests/sim/test_sim_simulation.cpp
     )
     target_link_libraries(business_game_sim_tests PRIVATE

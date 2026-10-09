@@ -196,6 +196,33 @@ uint32_t CommandQueue::submit(std::unique_ptr<Command> command, const uint32_t p
     return sequence;
 }
 
+void CommandQueue::write(ByteWriter& out) const {
+    out.write_u32(next_sequence);
+    out.write_u32(static_cast<uint32_t>(queued.size()));
+    // The tick in each is meaningless until take() stamps it, but written
+    // anyway, so a queued command has the same layout as one in a log
+    for (const StampedCommand& c : queued) write_command(out, c);
+}
+
+bool CommandQueue::read(ByteReader& in) {
+    queued.clear();
+    next_sequence = 0;
+
+    uint32_t sequence = 0;
+    uint32_t count = 0;
+    if (!in.read_u32(&sequence) || !in.read_u32(&count)) return false;
+
+    std::vector<StampedCommand> commands;
+    for (uint32_t i = 0; i < count; ++i) {
+        std::optional<StampedCommand> c = read_command(in);
+        if (!c) return false;
+        commands.push_back(std::move(*c));
+    }
+    queued = std::move(commands);
+    next_sequence = sequence;
+    return true;
+}
+
 std::vector<StampedCommand> CommandQueue::take(const uint64_t tick) {
     std::vector<StampedCommand> out = std::move(queued);
     queued.clear();

@@ -26,4 +26,14 @@ void Vehicles::write(ByteWriter& out) const {
     });
 }
 
+bool Vehicles::read(ByteReader& in) {
+    return pool.read(in, [](ByteReader& r, Vehicle* v) {
+        // The route is not checked against the routes: a vehicle whose route
+        // is missing simply stops, which advance() already allows for
+        return r.read_u32(&v->route.index) && r.read_u32(&v->route.generation)
+            && r.read_fixed(&v->distance) && r.read_fixed(&v->speed)
+            && r.read_string(&v->model, MAX_ASSET_ID_LENGTH);
+    });
+}
+
 } // namespace sim
