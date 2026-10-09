@@ -216,9 +216,40 @@ void VoxelMap::update_models() {
 
     // Only the chunks marked for it. Walking the flags is far cheaper than
     // looking every chunk up every frame, as almost none are marked.
-    for (auto& [chunk_pos, dirty] : chunk_was_updated) {
-        if (!dirty) continue;
-        dirty = false;
+    mesh_queue.clear();
+    for (const auto& [chunk_pos, dirty] : chunk_was_updated) {
+        if (dirty) mesh_queue.push_back(chunk_pos);
+    }
+    if (mesh_queue.empty()) return;
+
+    // A new island marks thousands at once, more than one frame can mesh
+    // without a stall, so a frame meshes what MESH_BUDGET_SECONDS allows and
+    // leaves the rest marked for the next. Nearest the camera first, so the
+    // land in view fills in before what is behind it. An edit marks a few,
+    // which all go in the frame it was made.
+    if (mesh_queue.size() > 1 && view != nullptr) {
+        // The camera in the map's own space (X grid x, Y grid z, Z grid y),
+        // where the chunks are
+        const Vector3 eye = Vector3Transform(view->camera.position,
+                                             MatrixInvert(transform_to_matrix(get_world_transform())));
+        const auto distance_sq = [&eye](const Int3 c) {
+            const float half = CHUNK_SIZE * 0.5f;
+            const float dx = static_cast<float>(c.x * CHUNK_SIZE) + half - eye.x;
+            const float dy = static_cast<float>(c.z * CHUNK_SIZE) + half - eye.y;
+            const float dz = static_cast<float>(c.y * CHUNK_SIZE) + half - eye.z;
+            return dx * dx + dy * dy + dz * dz;
+        };
+        std::sort(mesh_queue.begin(), mesh_queue.end(), [&distance_sq](const Int3 a, const Int3 b) {
+            return distance_sq(a) < distance_sq(b);
+        });
+    }
+    const double deadline = GetTime() + MESH_BUDGET_SECONDS;
+
+    for (size_t queued = 0; queued < mesh_queue.size(); ++queued) {
+        // At least one a frame, however slow
+        if (queued > 0 && GetTime() > deadline) break;
+        const Int3 chunk_pos = mesh_queue[queued];
+        chunk_was_updated[chunk_pos] = false;
 
         const auto found = chunks.find(chunk_pos);
         if (found == chunks.end()) continue;

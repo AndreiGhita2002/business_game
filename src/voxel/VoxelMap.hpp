@@ -19,6 +19,10 @@ class VoxelVolume;
 // world (sim::MAX_WORLD_CELLS cells of 256 voxels) is 8192 across.
 constexpr int MAX_MAP_SIZE = 8192;
 
+// How long update_models() spends meshing a frame, in seconds, before leaving
+// the rest of the marked chunks for the next frame. A quarter of a 60 fps frame.
+constexpr double MESH_BUDGET_SECONDS = 0.004;
+
 class VoxelMap final : public VoxelGrid {
 
 public:
@@ -131,6 +135,9 @@ protected:
     bool write_voxel(Int3 grid_pos, VoxelID id) override;
 
 private:
+    // The chunks update_models() meshes this frame, nearest first. A member so
+    // its memory is kept between frames.
+    std::vector<Int3> mesh_queue;
     Int2 size;
     int height = 0;
     Int3 chunk_count;

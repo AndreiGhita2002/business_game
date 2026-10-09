@@ -363,7 +363,7 @@ The UI/scene uses a `ViewNode` tree hierarchy with recursive update/render trave
 ### Voxel System
 
 **VoxelGrid** (abstract base in `src/voxel/VoxelGrid.hpp`) has two implementations:
-- **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks keyed by `Int3`), any number of chunks tall (`get_height()`; the game's is 256 voxels, 16 chunks), the size of the whole world (2560 voxels across by default). **Sparse**: a chunk only exists once something is written to it (`ensure_chunk()`, which `write_voxel()` calls; air into a missing chunk does nothing), and `get_voxel()` is null where there is none, so read through `is_solid()` or check for null. `clear()` drops every chunk and its model, `resize()` is a new size of air. It starts as air: the terrain is the simulation's, drawn in by `entity/TerrainVoxels`. A write on a chunk's border remeshes only the neighbours that exist. `update_models()` visits only the chunks marked in `chunk_was_updated` (and every model only when the render distance is limited), looks a chunk's 26 neighbours up once rather than per voxel, counts **below the map as solid** (so the underside is never meshed), and gives a chunk that is solid all through with solid on all six sides an empty model without running the mesher - most of an island. `solid_top()` is one pass over the chunks.
+- **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks keyed by `Int3`), any number of chunks tall (`get_height()`; the game's is 256 voxels, 16 chunks), the size of the whole world (2560 voxels across by default). **Sparse**: a chunk only exists once something is written to it (`ensure_chunk()`, which `write_voxel()` calls; air into a missing chunk does nothing), and `get_voxel()` is null where there is none, so read through `is_solid()` or check for null. `clear()` drops every chunk and its model, `resize()` is a new size of air. It starts as air: the terrain is the simulation's, drawn in by `entity/TerrainVoxels`. A write on a chunk's border remeshes only the neighbours that exist. `update_models()` visits only the chunks marked in `chunk_was_updated` (and every model only when the render distance is limited), looks a chunk's 26 neighbours up once rather than per voxel, counts **below the map as solid** (so the underside is never meshed), and gives a chunk that is solid all through with solid on all six sides an empty model without running the mesher - most of an island. It meshes for at most `MESH_BUDGET_SECONDS` (4 ms) a frame, the marked chunks nearest the camera first, leaving the rest marked for the next frame (at least one a frame); an edit marks a few, which go in at once. `solid_top()` is one pass over the chunks.
 - **SingleChunkGrid** (`src/voxel/SingleChunkGrid.cpp/hpp`) - Single chunk for the voxel editor
 
 **VoxelMesher** (`src/voxel/VoxelMesher.cpp/hpp`) converts a chunk into **one
@@ -919,9 +919,10 @@ take the narrow header instead of dragging in the window and the view tree.
   by side already overflow that, and the casters past the eighth cast no shadow
   on that draw. A real fleet wants either one brick per vehicle or a larger cap.
 - An island is thousands of voxel chunks (a two by two mountainous one is up to
-  about 12000, most of them buried and never drawn), all meshed on the first
-  frame after `start_world()`, and every one on the surface is a draw call.
-  Greedy meshing and chunk-level culling are what would bring both down.
+  about 12000, most of them buried and never meshed). They are meshed over
+  several frames, nearest first (`MESH_BUDGET_SECONDS`), so a new island
+  fills in round the camera rather than stalling one frame; the shadow volume
+  is complete from the start, so a chunk not meshed yet still casts.
 - The sea floor plane is unlit, so it does not match lit stone exactly where
   an ocean cell meets an island's own sea floor; and it is not a grid, so the
   editor cannot pick it.
