@@ -119,9 +119,13 @@ Terrain generate_terrain(const TerrainSettings& settings) {
                 (sample * settings.hill_height).floor_int(), 0, settings.size_z - 1));
 
             for (int32_t z = 0; z <= top; ++z) {
+                // Stone unless it is near the top of a column and out of the
+                // water: a sea floor is stone all through
                 BlockType type = BlockType::Stone;
-                if (z == top) type = BlockType::Grass;
-                else if (z >= top - settings.dirt_depth) type = BlockType::Dirt;
+                if (!block_under_water(z, settings.water_level)) {
+                    if (z == top) type = BlockType::Grass;
+                    else if (z >= top - settings.dirt_depth) type = BlockType::Dirt;
+                }
                 terrain.set(x, y, z, type);
             }
         }

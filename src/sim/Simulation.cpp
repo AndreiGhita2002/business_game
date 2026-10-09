@@ -11,6 +11,7 @@ namespace sim {
 Simulation::Simulation(const uint64_t seed, const TerrainSettings& terrain) {
     world.rng = Rng(seed);
     world.terrain = generate_terrain(terrain);
+    world.water_level = terrain.water_level;
 }
 
 void Simulation::step(const std::span<const StampedCommand> commands) {

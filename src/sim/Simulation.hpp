@@ -26,15 +26,6 @@ namespace sim {
 constexpr int TICKS_PER_SECOND = 20;
 
 /**
- * The water level a new game starts with, and the lowest one there can be.
- * A level is a voxel layer: the water fills layers 0 to the level, one layer
- * per unit of z. 0 is the lowest because layer 0 is the bottom of the world.
- */
-// 4 is one unit over the lowest ground, which is a block (4 units) tall.
-constexpr int32_t DEFAULT_WATER_LEVEL = 4;
-constexpr int32_t MIN_WATER_LEVEL = 0;
-
-/**
  * Everything the simulation is, as something that can be changed. Only a
  * Command ever holds one of these, inside Simulation::step(): from outside,
  * the state is reachable through Simulation's const accessors and nothing
@@ -77,7 +68,10 @@ private:
  */
 class Simulation {
 public:
-    /** A new game: the Rng seeded, and the terrain generated from `terrain`. */
+    /**
+     * A new game: the Rng seeded, the terrain generated from `terrain`, and
+     * the water at the level the terrain was generated for.
+     */
     explicit Simulation(uint64_t seed, const TerrainSettings& terrain = TerrainSettings{});
 
     /**

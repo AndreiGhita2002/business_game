@@ -146,6 +146,7 @@ TEST_CASE("Terrain: generated columns are stone, then dirt, then grass on top", 
                 const BlockType block = terrain.get(x, y, z);
                 types.insert(block);
                 if (z > top) REQUIRE(block == BlockType::Air);
+                else if (block_under_water(z, settings.water_level)) REQUIRE(block == BlockType::Stone);
                 else if (z == top) REQUIRE(block == BlockType::Grass);
                 else if (z >= top - settings.dirt_depth) REQUIRE(block == BlockType::Dirt);
                 else REQUIRE(block == BlockType::Stone);
@@ -207,6 +208,45 @@ TEST_CASE("Terrain: the hill height sets how tall and how steep", "[sim][terrain
     measure(generate_terrain(none), &none_top, &none_step);
     REQUIRE(none_top == 1);
     REQUIRE(none_step == 0);
+}
+
+TEST_CASE("Terrain: everything under the water is stone", "[sim][terrain][water]") {
+    // Which blocks count: wholly under the water's top, level + 1
+    REQUIRE(block_under_water(0, 3));         // block top 4, water top 4
+    REQUIRE_FALSE(block_under_water(0, 2));   // water top 3, the block sticks out
+    REQUIRE(block_under_water(0, DEFAULT_WATER_LEVEL));
+    REQUIRE_FALSE(block_under_water(1, DEFAULT_WATER_LEVEL));
+    REQUIRE(block_under_water(2, 11));
+    REQUIRE_FALSE(block_under_water(2, 10));
+
+    // A deep sea: the bottom three layers of blocks are under it
+    TerrainSettings settings;
+    settings.water_level = 12;
+    const Terrain terrain = generate_terrain(settings);
+    bool grass_above = false;
+    for (int32_t x = 0; x < terrain.size_x(); ++x) {
+        for (int32_t y = 0; y < terrain.size_y(); ++y) {
+            // Every block there is under it, which is not to say every layer:
+            // a column lower than the water is still only as tall as it is
+            const int32_t top = terrain.column_height(x, y) - 1;
+            for (int32_t z = 0; z < std::min(3, top + 1); ++z) {
+                REQUIRE(terrain.get(x, y, z) == BlockType::Stone);
+            }
+            if (top >= 3 && terrain.get(x, y, top) == BlockType::Grass) grass_above = true;
+        }
+    }
+    // The hills above the water still have their grass
+    REQUIRE(grass_above);
+
+    // With no water over even the lowest blocks, the floor is grass again
+    TerrainSettings dry;
+    dry.water_level = MIN_WATER_LEVEL;
+    const Terrain dry_terrain = generate_terrain(dry);
+    REQUIRE(dry_terrain.get(0, 0, dry_terrain.column_height(0, 0) - 1) == BlockType::Grass);
+
+    // And a game starts with its water where its terrain was made for
+    const Simulation sim(1, settings);
+    REQUIRE(sim.water_level() == 12);
 }
 
 TEST_CASE("Terrain: the same settings give the same terrain", "[sim][terrain]") {

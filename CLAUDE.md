@@ -216,7 +216,12 @@ z up, each `BLOCK_SIZE` units on a side. It is the gameplay grid.
   middle, and scales it so a sample of 1 stands `hill_height` blocks tall,
   cut off at the top of the world. The top
   block is grass, `dirt_depth` blocks of dirt under it, stone below that, and
-  every column keeps at least its bottom block. The defaults are 32x32x32 blocks
+  every column keeps at least its bottom block. Every block wholly under the
+  water (`block_under_water()`: its top no higher than `water_level + 1`) is
+  stone instead, a sea floor; `TerrainSettings::water_level` says which level,
+  and `Simulation(seed, settings)` starts the water there.
+  `DEFAULT_WATER_LEVEL` / `MIN_WATER_LEVEL` live in `Terrain.hpp` for that
+  reason. The defaults are 32x32x32 blocks
   (128 voxels on every side) from seed 123456, the old voxel terrain's seed.
 - **Slopes:** the steepest a slope gets is roughly `hill_height *
   noise_scale` blocks per block, so the two together set it. The default hill

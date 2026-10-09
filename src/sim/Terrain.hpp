@@ -36,6 +36,17 @@ const char* block_type_name(BlockType type);
  */
 constexpr int32_t BLOCK_SIZE = 4;
 
+/**
+ * The water level a new game starts with, and the lowest one there can be.
+ * A level is a unit layer: the water fills layers 0 to the level, one layer
+ * per unit of z, so its top is at level + 1. 0 is the lowest because layer 0
+ * is the bottom of the world. Here rather than with the rest of the water in
+ * Simulation.hpp because the terrain is generated for a water level.
+ */
+// 4 is one unit over the lowest ground, which is a block (4 units) tall.
+constexpr int32_t DEFAULT_WATER_LEVEL = 4;
+constexpr int32_t MIN_WATER_LEVEL = 0;
+
 /** What generate_terrain() makes. The defaults are the game's map. */
 struct TerrainSettings {
     // In blocks
@@ -61,6 +72,11 @@ struct TerrainSettings {
     int32_t hill_height = 8;
     // How many blocks of dirt sit under the grass before the stone starts
     int32_t dirt_depth = 1;
+    // The water level the terrain is made for, in units (see
+    // DEFAULT_WATER_LEVEL), and the one a game made from these settings
+    // starts with. Every block wholly under the water is stone, whatever it
+    // would have been: a sea floor rather than drowned grass.
+    int32_t water_level = DEFAULT_WATER_LEVEL;
 };
 
 /**
@@ -139,12 +155,22 @@ constexpr int64_t MAX_TERRAIN_BLOCKS = int64_t{1} << 26;
 /**
  * Terrain from Perlin noise: one sample per column, at the middle of the
  * column, picks how tall it stands. The top block is grass, the dirt_depth
- * blocks under it dirt, and everything below that stone. Every column has at
+ * blocks under it dirt, and everything below that stone. Every block wholly
+ * under the water (block_under_water()) is stone as well. Every column has at
  * least its bottom block, so there is no hole through the world.
  *
  * The same settings give the same terrain on every machine.
  */
 Terrain generate_terrain(const TerrainSettings& settings);
+
+/**
+ * Whether the block at layer z is wholly under water at `water_level`: its
+ * top, (z + 1) * BLOCK_SIZE units up, is no higher than the water's top,
+ * water_level + 1. A block only part way in, a shore, is not.
+ */
+constexpr bool block_under_water(const int32_t z, const int32_t water_level) {
+    return int64_t{z + 1} * BLOCK_SIZE <= int64_t{water_level} + 1;
+}
 
 } // namespace sim
 
