@@ -21,20 +21,45 @@ enum class BlockType : uint8_t {
     Stone = 1,
     Dirt = 2,
     Grass = 3,
+    // The rest came with the islands (sim/Island.hpp), for their biomes:
+    // beaches and deserts, the rock under a desert, snowy ground, and the
+    // shingle beaches of a snowy island
+    Sand = 4,
+    Sandstone = 5,
+    Snow = 6,
+    Gravel = 7,
 };
 
 /** One past the highest BlockType, for refusing a number that is not one. */
-constexpr uint8_t BLOCK_TYPE_COUNT = 4;
+constexpr uint8_t BLOCK_TYPE_COUNT = 8;
 
 const char* block_type_name(BlockType type);
 
 /**
  * How many simulation units a block is across, on every axis. A block is the
- * terrain's cell: the gameplay grid is made of them, and anything that sits on
- * the terrain sits on a block. Positions within a block are still in units
- * (and fractions of one, being Fixed), so a vehicle drives smoothly across it.
+ * terrain's unit of gameplay: the gameplay grid is made of them, and anything
+ * that sits on the terrain sits on a block. Positions within a block are still
+ * in units (and fractions of one, being Fixed), so a vehicle drives smoothly
+ * across it.
  */
 constexpr int32_t BLOCK_SIZE = 4;
+
+/**
+ * How many blocks a cell is across, and how tall the world is. The world is a
+ * grid of cells (docs/terrain.md): each one is either ocean, a flat sea floor
+ * and nothing else, or part of an island.
+ */
+constexpr int32_t CELL_BLOCKS = 64;
+
+/** The world a new game gets, in cells on each side, and the most it can have. */
+constexpr int32_t DEFAULT_WORLD_CELLS = 10;
+// 32 cells is 2048 blocks, 8192 voxels, a side. Ocean costs next to nothing
+// on either side of the split, so the limit is set by what the presentation
+// has to walk every frame (the water's chunks) rather than by memory.
+constexpr int32_t MAX_WORLD_CELLS = 32;
+
+/** How many blocks of stone an ocean cell's floor is. */
+constexpr int32_t SEA_FLOOR_BLOCKS = 2;
 
 /**
  * The water level a new game starts with, and the lowest one there can be.
@@ -43,45 +68,42 @@ constexpr int32_t BLOCK_SIZE = 4;
  * is the bottom of the world. Here rather than with the rest of the water in
  * Simulation.hpp because the terrain is generated for a water level.
  */
-// 4 is one unit over the lowest ground, which is a block (4 units) tall.
-constexpr int32_t DEFAULT_WATER_LEVEL = 4;
+// 15 puts the water's top at 16 units, four blocks up: two blocks of water
+// over the sea floor.
+constexpr int32_t DEFAULT_WATER_LEVEL = 15;
 constexpr int32_t MIN_WATER_LEVEL = 0;
 
-/** What generate_terrain() makes. The defaults are the game's map. */
+/** What generate_terrain() makes. The defaults are the game's world. */
 struct TerrainSettings {
-    // In blocks
-    int32_t size_x = 32;
-    int32_t size_y = 32;
-    // 128 units, so 128 voxels on screen
-    int32_t size_z = 32;
-    // The seed of the noise's permutation, not of the simulation's Rng: the
-    // terrain is the same whatever the game's seed is, until a game wants
-    // otherwise. 123456 is what the presentation's terrain always used.
+    // How many cells the world is on each side. Brought down to
+    // MAX_WORLD_CELLS; 0 or less makes no terrain at all, which a load uses
+    // to skip generating one it is about to replace.
+    int32_t cells_x = DEFAULT_WORLD_CELLS;
+    int32_t cells_y = DEFAULT_WORLD_CELLS;
+    // Where the island comes from: its shape, relief and biome are drawn from
+    // this (random_island_spec() in sim/Island.hpp), and so is the seed of its
+    // noise. Not the simulation's Rng: the terrain is the same whatever the
+    // game's seed is.
     uint32_t seed = 123456;
-    // How far through the noise one block moves. The old voxel terrain moved
-    // a twentieth per voxel, and a block is four of those.
-    Fixed noise_scale = Fixed::from_ratio(1, 5);
-    // How many blocks a noise sample of 1 stands, which sets how tall the
-    // hills are and with them how steep: a slope is roughly hill_height *
-    // noise_scale blocks per block at its steepest. Kept apart from size_z so
-    // the world can have headroom without every slope turning into a cliff.
-    // Anything past the top of the world is cut off at size_z.
-    // 8 tops out at 6 blocks with nearly every slope a single block step; 32
-    // reached 23 blocks, but four in ten neighbouring columns were more than a
-    // block apart. Taller and still gentle wants a smaller noise_scale too.
-    int32_t hill_height = 8;
-    // How many blocks of dirt sit under the grass before the stone starts
-    int32_t dirt_depth = 1;
     // The water level the terrain is made for, in units (see
     // DEFAULT_WATER_LEVEL), and the one a game made from these settings
     // starts with. Every block wholly under the water is stone, whatever it
     // would have been: a sea floor rather than drowned grass.
     int32_t water_level = DEFAULT_WATER_LEVEL;
+    // One island in the middle of the world, or nothing but ocean
+    bool centre_island = true;
 };
 
 /**
  * The ground, as a 3D grid of blocks: x and y across the map, z up, block
  * (x, y, z) covering units [x, x + 1) * BLOCK_SIZE on each axis.
+ *
+ * The blocks are held a cell at a time. A cell nothing has written to is
+ * ocean: `sea_floor` blocks of stone in every column and air above, which
+ * takes no memory, so a world that is mostly sea is cheap whatever its size.
+ * Writing a block that differs from that gives the cell blocks of its own,
+ * with the sea floor copied in first. Every query answers the same for an
+ * ocean cell as for a cell holding the same blocks.
  *
  * Blocks are the simulation's terrain. The presentation draws each one as
  * more detail than the simulation knows about, but nothing it draws flows
@@ -92,14 +114,39 @@ public:
     /** No blocks at all. */
     Terrain() = default;
 
-    /** All air. Every size has to be positive, or the terrain is left empty. */
-    Terrain(int32_t size_x, int32_t size_y, int32_t size_z);
+    /**
+     * cells_x by cells_y cells of ocean, each cell_blocks across and size_z
+     * tall, with sea_floor blocks of stone under every column. A size that is
+     * not positive, or a sea floor outside [0, size_z], leaves it empty.
+     */
+    Terrain(int32_t cells_x, int32_t cells_y, int32_t cell_blocks = CELL_BLOCKS,
+            int32_t size_z = CELL_BLOCKS, int32_t sea_floor = SEA_FLOOR_BLOCKS);
 
-    int32_t size_x() const { return sx; }
-    int32_t size_y() const { return sy; }
+    /**
+     * Nothing but air, size_x by size_y by size_z blocks: every column its own
+     * cell, and no sea floor. For a small terrain built by hand, block by
+     * block, which is what the tests do.
+     */
+    static Terrain of_blocks(int32_t size_x, int32_t size_y, int32_t size_z);
+
+    // In blocks
+    int32_t size_x() const { return cx * cb; }
+    int32_t size_y() const { return cy * cb; }
     int32_t size_z() const { return sz; }
 
+    int32_t cells_x() const { return cx; }
+    int32_t cells_y() const { return cy; }
+    int32_t cell_blocks() const { return cb; }
+    /** How many blocks of stone an ocean cell's columns are. */
+    int32_t sea_floor() const { return floor_blocks; }
+
     bool in_bounds(int32_t x, int32_t y, int32_t z) const;
+
+    /** Whether cell (x, y) is ocean, holding no blocks of its own. False outside the terrain. */
+    bool is_ocean_cell(int32_t cell_x, int32_t cell_y) const;
+
+    /** Turns cell (x, y) back into ocean. Nothing happens outside the terrain. */
+    void reset_cell(int32_t cell_x, int32_t cell_y);
 
     /** The block at (x, y, z). Outside the terrain is air. */
     BlockType get(int32_t x, int32_t y, int32_t z) const;
@@ -122,42 +169,58 @@ public:
     Fixed ground_level(Fixed x, Fixed y) const;
 
     /**
-     * i32 size_x, size_y, size_z, then one byte per block, x fastest, then
-     * y, then z. Raw: the default map is 4 KiB, small enough that compressing
-     * it would not be worth what it costs the checksum on every call.
+     * i32 cells_x, cells_y, cell_blocks, size_z, sea_floor, then a cell at a
+     * time, x fastest: u8 0 for ocean, or u8 1 and then its blocks, a byte
+     * each, x fastest, then y, then z. Raw: an island is a few cells, and the
+     * ocean round it a byte a cell.
      */
     void write(ByteWriter& out) const;
 
     /**
      * What write() wrote. Refuses a negative size, a terrain too big to be a
-     * real one, and a byte that is not a BlockType.
+     * real one, a cell that is neither ocean nor land, and a byte that is not
+     * a BlockType.
      */
     bool read(ByteReader& in);
 
     bool operator==(const Terrain&) const = default;
 
 private:
-    int32_t sx = 0;
-    int32_t sy = 0;
+    int32_t cx = 0;
+    int32_t cy = 0;
+    int32_t cb = 0;
     int32_t sz = 0;
-    std::vector<BlockType> blocks;
+    int32_t floor_blocks = 0;
+    // A cell each, x fastest. Empty for an ocean cell, otherwise cb * cb * sz
+    // blocks, x fastest, then y, then z.
+    std::vector<std::vector<BlockType>> cells;
 
-    size_t index(int32_t x, int32_t y, int32_t z) const {
-        return static_cast<size_t>(x)
-             + static_cast<size_t>(y) * static_cast<size_t>(sx)
-             + static_cast<size_t>(z) * static_cast<size_t>(sx) * static_cast<size_t>(sy);
+    size_t cell_index(const int32_t cell_x, const int32_t cell_y) const {
+        return static_cast<size_t>(cell_x) + static_cast<size_t>(cell_y) * static_cast<size_t>(cx);
+    }
+    // Where block (x, y, z) of the whole terrain sits among its cell's blocks
+    size_t block_index(int32_t x, int32_t y, int32_t z) const;
+    // What an ocean cell holds at height z
+    BlockType ocean_block(const int32_t z) const {
+        return z < floor_blocks ? BlockType::Stone : BlockType::Air;
     }
 };
 
-/** The most blocks a terrain read back from bytes may have, 64 MiB of them. */
+/** The most blocks a terrain read back from bytes may hold in its land cells, 64 MiB of them. */
 constexpr int64_t MAX_TERRAIN_BLOCKS = int64_t{1} << 26;
+/**
+ * The most cells along a side, and blocks across a cell or up, that a terrain
+ * read back from bytes may have. Looser than MAX_WORLD_CELLS, which is the
+ * game's own limit, so a terrain built of one column cells still reads.
+ */
+constexpr int32_t MAX_TERRAIN_CELLS_PER_SIDE = 256;
+constexpr int32_t MAX_TERRAIN_CELL_BLOCKS = 256;
 
 /**
- * Terrain from Perlin noise: one sample per column, at the middle of the
- * column, picks how tall it stands. The top block is grass, the dirt_depth
- * blocks under it dirt, and everything below that stone. Every block wholly
- * under the water (block_under_water()) is stone as well. Every column has at
- * least its bottom block, so there is no hole through the world.
+ * The world for `settings`: cells_x by cells_y cells of ocean and, unless it
+ * is asked not to, one island in the middle drawn from the seed
+ * (random_island_spec() and place_island() in sim/Island.hpp). An island
+ * that does not fit the world in any of its turns is left out.
  *
  * The same settings give the same terrain on every machine.
  */

@@ -45,6 +45,15 @@ inline int silence_raylib_logs() {
 }
 inline const int logs_silenced = silence_raylib_logs();
 
+/**
+ * The voxel at `pos`, with a chunk a VoxelMap never made read as the air it
+ * stands for (get_voxel() gives null there).
+ */
+inline VoxelID voxel_at(VoxelGrid& grid, const Int3 pos) {
+    const VoxelID* voxel = grid.get_voxel(pos);
+    return voxel != nullptr ? *voxel : 0;
+}
+
 /** A small palette, enough for the ids the tests place. */
 inline VoxelColourMap make_palette() {
     auto colours = std::make_shared<std::map<VoxelID, Color>>();

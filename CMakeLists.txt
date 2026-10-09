@@ -67,6 +67,8 @@ add_library(business_game_sim STATIC
         src/sim/Event.hpp
         src/sim/Fixed.hpp
         src/sim/Handle.hpp
+        src/sim/Island.cpp
+        src/sim/Island.hpp
         src/sim/Noise.cpp
         src/sim/Noise.hpp
         src/sim/Pool.hpp
@@ -227,6 +229,7 @@ if(BUSINESS_GAME_BUILD_TESTS)
     add_executable(business_game_sim_tests
             src/tests/sim/test_sim_core.cpp
             src/tests/sim/test_sim_determinism.cpp
+            src/tests/sim/test_sim_island.cpp
             src/tests/sim/test_sim_routes.cpp
             src/tests/sim/test_sim_save.cpp
             src/tests/sim/test_sim_simulation.cpp

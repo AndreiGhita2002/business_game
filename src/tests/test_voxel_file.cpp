@@ -280,10 +280,10 @@ TEST_CASE("a single chunk grid survives a save and a load", "[voxelfile][file]")
     REQUIRE(loaded->description == "a wooden box");
     REQUIRE_TRANSFORM_EQ(loaded->get_transform(), placed);
 
-    REQUIRE(*loaded->get_voxel(Int3{1, 2, 3}) == 1);
-    REQUIRE(*loaded->get_voxel(Int3{4, 5, 6}) == 2);
-    REQUIRE(*loaded->get_voxel(Int3{15, 15, 15}) == 3);
-    REQUIRE(*loaded->get_voxel(Int3{0, 0, 0}) == 0);
+    REQUIRE(test::voxel_at(*loaded, Int3{1, 2, 3}) == 1);
+    REQUIRE(test::voxel_at(*loaded, Int3{4, 5, 6}) == 2);
+    REQUIRE(test::voxel_at(*loaded, Int3{15, 15, 15}) == 3);
+    REQUIRE(test::voxel_at(*loaded, Int3{0, 0, 0}) == 0);
 
     // The palette in the file came back with it
     REQUIRE(loaded->voxel_colours != nullptr);
@@ -335,12 +335,12 @@ TEST_CASE("a voxel map survives a save and a load", "[voxelfile][file]") {
     REQUIRE(size.y == 16);
     REQUIRE(static_cast<VoxelMap*>(loaded)->get_height() == 32);
 
-    REQUIRE(*loaded->get_voxel(Int3{0, 0, 0}) == 1);
-    REQUIRE(*loaded->get_voxel(Int3{20, 3, 5}) == 2);
-    REQUIRE(*loaded->get_voxel(Int3{31, 15, 15}) == 3);
-    REQUIRE(*loaded->get_voxel(Int3{17, 2, 30}) == 4);
-    REQUIRE(*loaded->get_voxel(Int3{10, 10, 10}) == 0);
-    REQUIRE(*loaded->get_voxel(Int3{10, 10, 20}) == 0);
+    REQUIRE(test::voxel_at(*loaded, Int3{0, 0, 0}) == 1);
+    REQUIRE(test::voxel_at(*loaded, Int3{20, 3, 5}) == 2);
+    REQUIRE(test::voxel_at(*loaded, Int3{31, 15, 15}) == 3);
+    REQUIRE(test::voxel_at(*loaded, Int3{17, 2, 30}) == 4);
+    REQUIRE(test::voxel_at(*loaded, Int3{10, 10, 10}) == 0);
+    REQUIRE(test::voxel_at(*loaded, Int3{10, 10, 20}) == 0);
 
     voxel_file::delete_grid_tree(loaded);
 }

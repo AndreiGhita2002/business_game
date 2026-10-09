@@ -4,9 +4,11 @@
 
 #include "main.hpp"
 
+#include <algorithm>
 #include <cfloat>
 #include <iostream>
 #include <fstream>
+#include <random>
 #include <sstream>
 #include <string>
 #include <stdexcept>
@@ -14,6 +16,7 @@
 
 #include "raylib-cpp.hpp"
 #include "entity/TerrainVoxels.hpp"
+#include "sim/Island.hpp"
 #include "voxel/VoxelMesher.hpp"
 #include "voxel/SingleChunkGrid.hpp"
 #include "ui/UIView.hpp"
@@ -62,17 +65,15 @@ constexpr float STATUS_SECONDS = 3.0f;
 /** F5 saves the game, F9 loads it. */
 static void handle_save_keys();
 
-/**
- * Queues the test scenario for the architecture slice: two loops of road over
- * the map and a dozen cars on them at different speeds, two running their loop
- * backwards. Goes through the command queue like anything else would, so the
- * setup runs at tick 0 and the cars spawn at tick 1, once the routes exist.
- *
- * The routes follow the terrain: every point takes its height from the top of
- * the simulation's terrain there. Worked out before the command is made, so
- * the command only carries plain numbers.
- */
-static void queue_test_scenario(const sim::Terrain& terrain);
+/** The settings a new world is generated with: world_cells_x by world_cells_y, from `seed`. */
+static sim::TerrainSettings world_settings(uint32_t seed);
+
+/** A seed nobody picked, for a world that is different every time. */
+static uint32_t fresh_seed();
+
+// What the readout says about the world on screen: the island's seed, shape,
+// relief and biome, or that it was loaded
+static std::string world_description;
 
 void global::init() {
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
@@ -84,7 +85,9 @@ void global::init() {
     SetExitKey(KEY_NULL);
 
     root_view = std::make_unique<ViewNode>(nullptr);
-    simulation = std::make_unique<sim::Simulation>(SIMULATION_SEED);
+    // A new island every time the game starts
+    world_seed = fresh_seed();
+    simulation = std::make_unique<sim::Simulation>(SIMULATION_SEED, world_settings(world_seed));
 
     voxel_shader = loadAndPatchShader("../resources/shaders/lighting", 2, MAX_GRID_VOLUMES);
     voxel_shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(voxel_shader, "viewPos");
@@ -93,12 +96,12 @@ void global::init() {
     int ambientLoc = GetShaderLocation(voxel_shader, "ambient");
     SetShaderValue(voxel_shader, ambientLoc, ambient, SHADER_UNIFORM_VEC4);
 
-    // Voxels. The map is sized to hold the simulation's terrain and then has
-    // it drawn in, a block as a cube of voxels.
+    // Voxels. The map is sized to hold the simulation's terrain, which
+    // start_world() draws into it, a block as a cube of voxels, once the
+    // water exists too.
     root_view->add_child(std::make_unique<VoxelView>(root_view.get(), &voxel_shader,
                                                      terrain_voxel_size(simulation->terrain())));
     voxel_view = static_cast<VoxelView *>(root_view->child.get());
-    build_terrain_voxels(*voxel_view->game_map, simulation->terrain());
 
     // Water over the whole map. A sibling of the VoxelView, after it, as it
     // needs the voxels' depth in the buffer to be hidden behind the terrain,
@@ -117,6 +120,10 @@ void global::init() {
     };
     root_view->add_child(std::move(water_node));
 
+    // The terrain drawn in, and the water, the sea floor, the shadows and the
+    // camera fitted to it
+    start_world();
+
     // The simulation's vehicles, made visible. Every asset is put on the map's
     // colours, and the placeholder cars come in three of them.
     assets = std::make_unique<AssetRegistry>(voxel_view->game_map->voxel_colours);
@@ -124,7 +131,6 @@ void global::init() {
     assets->register_builder("car.blue", placeholder_car_builder(4), PLACEHOLDER_CAR_PIVOT);
     assets->register_builder("car.orange", placeholder_car_builder(5), PLACEHOLDER_CAR_PIVOT);
     entities = std::make_unique<EntityManager>(voxel_view, assets.get(), voxel_view);
-    queue_test_scenario(simulation->terrain());
 
     // UI
     // Added after the VoxelView, so it ends up as its sibling and is rendered
@@ -151,9 +157,9 @@ void global::init() {
     sim_readout->background = ui_view->style.background;
     ui_view->add_child(std::move(sim_readout_node));
     add_script(std::make_unique<LambdaScript>("simulation readout", [sim_readout](const float delta) {
-        sim_readout->text = TextFormat("tick %llu  |  %d ticks this frame  |  %zu vehicles, %zu drawn",
+        sim_readout->text = TextFormat("tick %llu  |  %d ticks this frame  |  %zu vehicles, %zu drawn  |  %s",
             static_cast<unsigned long long>(simulation->tick()), ticks_last_frame,
-            simulation->vehicles().size(), entities->realized_count());
+            simulation->vehicles().size(), entities->realized_count(), world_description.c_str());
         if (status_seconds_left > 0.0f) {
             sim_readout->text += "  |  " + status_message;
             status_seconds_left -= delta;
@@ -215,6 +221,17 @@ void global::init() {
         },
         16, 16, 1024);
 
+    // How many cells the next new world is on each side. They change nothing
+    // until "New Island" makes one.
+    settings_menu->add_int_row("world cells x",
+        [] { return world_cells_x; },
+        [](const int cells) { world_cells_x = cells; },
+        1, 1, sim::MAX_WORLD_CELLS);
+    settings_menu->add_int_row("world cells y",
+        [] { return world_cells_y; },
+        [](const int cells) { world_cells_y = cells; },
+        1, 1, sim::MAX_WORLD_CELLS);
+
     ui_view->add_child(std::move(settings_menu_node));
 
     ui_view->add_child(std::make_unique<UIButton>(ui_view, "Game Settings",
@@ -236,6 +253,10 @@ void global::init() {
         Light& sun = voxel_view->lights[voxel_view->sun_light_id];
         sun.enabled = !sun.enabled;
     });
+
+    // A whole new game: another island from another seed, in a world of the
+    // size the settings menu says
+    add_bottom_left_button("New Island", [] { new_world(fresh_seed()); });
 
     // The selected vehicle, under the readout. Added before the menus below so
     // that it is updated before them: a click that arms one of them is then
@@ -379,66 +400,108 @@ void global::mainLoop() {
     EndDrawing();
 }
 
-static void queue_test_scenario(const sim::Terrain& terrain) {
-    // Outside the namespace, but it is setting up global state throughout
-    using namespace global;
-    using sim::Fixed;
-    using sim::Point;
+static sim::TerrainSettings world_settings(const uint32_t seed) {
+    sim::TerrainSettings settings;
+    settings.cells_x = global::world_cells_x;
+    settings.cells_y = global::world_cells_y;
+    settings.seed = seed;
+    return settings;
+}
 
-    // The top of the ground, so the cars stand on it rather than in it
-    const auto ground = [&terrain](const int x, const int y) {
-        return terrain.ground_level(Fixed::from_int(x), Fixed::from_int(y));
-    };
+static uint32_t fresh_seed() {
+    // The presentation's to pick, not the simulation's: the seed is all the
+    // simulation is given, and the same seed gives the same world everywhere
+    return std::random_device{}();
+}
 
-    // A rectangle through (x0, y0) and (x1, y1), with a point every `step`
-    // voxels along each side. Each point is on the ground, and a car takes its
-    // height from the two points either side of it, so the closer they are
-    // the less it cuts through the bumps in between.
-    const auto loop = [&ground](const int x0, const int y0, const int x1, const int y1, const int step) {
-        std::vector<Point> points;
-        const auto add = [&](const int x, const int y) {
-            points.push_back(Point{Fixed::from_int(x), Fixed::from_int(y), ground(x, y)});
-        };
-        for (int x = x0; x < x1; x += step) add(x, y0);
-        for (int y = y0; y < y1; y += step) add(x1, y);
-        for (int x = x1; x > x0; x -= step) add(x, y1);
-        for (int y = y1; y > y0; y -= step) add(x0, y);
-        return points;
-    };
+void global::new_world(const uint32_t seed) {
+    // The same order a load goes in: nothing on screen outlives the old game
+    entities->clear();
+    world_seed = seed;
+    // Assigned into the existing objects rather than replacing them, as the
+    // vehicle panel holds pointers to both
+    *simulation = sim::Simulation(SIMULATION_SEED, world_settings(seed));
+    commands = sim::CommandQueue{};
+    tick_accumulator = 0.0f;
+    start_world();
 
-    commands.submit(std::make_unique<sim::AddRoute>(loop(12, 12, 116, 116, 2)));
-    commands.submit(std::make_unique<sim::AddRoute>(loop(40, 40, 88, 72, 2)));
+    const sim::IslandSpec spec = sim::random_island_spec(seed);
+    TraceLog(LOG_INFO, "WORLD: %i x %i cells, seed %u: %s, %s, %s island", simulation->terrain().cells_x(),
+             simulation->terrain().cells_y(), seed, sim::island_shape_name(spec.shape),
+             sim::elevation_name(spec.elevation), sim::biome_name(spec.biome));
+}
 
-    // The routes do not exist until tick 0 has run, and the queue hands every
-    // command to the next tick, so the cars are queued from a script that
-    // waits for the routes to be announced. It removes nothing and does
-    // nothing once it has fired.
-    add_script(std::make_unique<LambdaScript>("spawn test cars", [fired = false](float) mutable {
-        if (fired || simulation->routes().size() < 2) return;
-        fired = true;
+void global::start_world() {
+    const sim::Terrain& terrain = simulation->terrain();
+    VoxelMap& map = *voxel_view->game_map;
 
-        // Route handles in the order they were added. Nothing else adds
-        // routes, so walking the pool gives exactly these two.
-        std::vector<sim::RouteId> routes;
-        simulation->routes().for_each([&routes](const sim::RouteId id, const sim::Route&) {
-            routes.push_back(id);
-        });
+    // The map resized to the terrain, which may be a loaded game's of another
+    // size, and the land drawn into it
+    const Int3 size = terrain_voxel_size(terrain);
+    map.resize(static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y), static_cast<uint32_t>(size.z));
+    build_terrain_voxels(map, terrain);
 
-        const char* colours[] = {"car.maroon", "car.blue", "car.orange"};
-        // Outer loop: eight cars spread round it at 2 to 5.5 voxels a second
-        const Fixed outer_length = simulation->routes().get(routes[0])->length();
-        for (int i = 0; i < 8; ++i) {
-            commands.submit(std::make_unique<sim::SpawnVehicle>(
-                routes[0], outer_length * i / 8, Fixed::from_ratio(4 + i, 40), colours[i % 3]));
+    // The box round the land cells, how tall the land gets, and a square of
+    // sea floor for every ocean cell, which the map does not hold
+    const int cell_voxels = terrain.cell_blocks() * BLOCK_VOXELS;
+    int land_min_x = size.x, land_min_y = size.y, land_max_x = 0, land_max_y = 0, land_top = 0;
+    std::vector<WaterChunk> floor;
+    for (int cell_y = 0; cell_y < terrain.cells_y(); ++cell_y) {
+        for (int cell_x = 0; cell_x < terrain.cells_x(); ++cell_x) {
+            const int x = cell_x * cell_voxels;
+            const int y = cell_y * cell_voxels;
+            if (terrain.is_ocean_cell(cell_x, cell_y)) {
+                floor.push_back(WaterChunk{static_cast<float>(x), static_cast<float>(y),
+                                           static_cast<float>(cell_voxels), static_cast<float>(cell_voxels)});
+                continue;
+            }
+            land_min_x = std::min(land_min_x, x);
+            land_min_y = std::min(land_min_y, y);
+            land_max_x = std::max(land_max_x, x + cell_voxels);
+            land_max_y = std::max(land_max_y, y + cell_voxels);
+            const int block_x = cell_x * terrain.cell_blocks();
+            const int block_y = cell_y * terrain.cell_blocks();
+            for (int by = block_y; by < block_y + terrain.cell_blocks(); ++by) {
+                for (int bx = block_x; bx < block_x + terrain.cell_blocks(); ++bx) {
+                    land_top = std::max(land_top, terrain.column_height(bx, by));
+                }
+            }
         }
-        // Inner loop: four cars, the last two going round the other way
-        const Fixed inner_length = simulation->routes().get(routes[1])->length();
-        for (int i = 0; i < 4; ++i) {
-            const Fixed speed = Fixed::from_ratio(3 + i, 40);
-            commands.submit(std::make_unique<sim::SpawnVehicle>(
-                routes[1], inner_length * i / 4, i < 2 ? speed : -speed, colours[(i + 1) % 3]));
-        }
-    }));
+    }
+    const bool any_land = land_max_x > land_min_x;
+
+    // Shadows over the land only. The ocean is flat and drawn by the water
+    // view, so nothing there casts or catches a shadow from the volume.
+    if (any_land) {
+        voxel_view->set_volume_window(Int3{land_min_x, land_min_y, 0},
+            Int3{land_max_x - land_min_x, land_max_y - land_min_y, land_top * BLOCK_VOXELS});
+    } else {
+        voxel_view->set_volume_window(Int3{0, 0, 0}, Int3{CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE});
+    }
+
+    water_view->set_area(size.x, size.y);
+    water_view->set_floor(std::move(floor), static_cast<float>(terrain.sea_floor() * BLOCK_VOXELS));
+
+    // The camera over the middle of the land, or of the world, far enough
+    // back to see the whole island. The map's matrix carries the point from
+    // the map's space (X grid x, Y up, Z grid y) into the world.
+    const float centre_x = any_land ? 0.5f * static_cast<float>(land_min_x + land_max_x) : 0.5f * size.x;
+    const float centre_z = any_land ? 0.5f * static_cast<float>(land_min_y + land_max_y) : 0.5f * size.y;
+    const float extent = any_land ? static_cast<float>(std::max(land_max_x - land_min_x, land_max_y - land_min_y))
+                                  : static_cast<float>(cell_voxels);
+    const Matrix map_matrix = transform_to_matrix(map.get_world_transform());
+    const Vector3 target = Vector3Transform(
+        Vector3{centre_x, static_cast<float>(simulation->water_level()), centre_z}, map_matrix);
+    const float back = 0.45f * extent + 40.0f;
+    voxel_view->camera.target = target;
+    voxel_view->camera.position = Vector3{target.x - back, target.y + back, target.z - back};
+
+    world_description = any_land ? TextFormat("seed %u", world_seed) : "no island";
+    if (any_land) {
+        const sim::IslandSpec spec = sim::random_island_spec(world_seed);
+        world_description += TextFormat(": %s, %s, %s", sim::island_shape_name(spec.shape),
+                                        sim::elevation_name(spec.elevation), sim::biome_name(spec.biome));
+    }
 }
 
 void global::show_status(const std::string& message) {
@@ -483,9 +546,10 @@ static void handle_save_keys() {
         tick_accumulator = 0.0f;
 
         // The terrain is the simulation's too, so the map is drawn again from
-        // the loaded one. The map keeps its size: a saved terrain of another
-        // size is drawn as far as it fits.
-        build_terrain_voxels(*voxel_view->game_map, simulation->terrain());
+        // the loaded one, at the loaded one's size, with everything round it
+        // fitted to it. The seed is not saved, so the readout cannot say it.
+        start_world();
+        world_description = "loaded game";
 
         TraceLog(LOG_INFO, "LOAD: loaded tick %llu from %s",
                  static_cast<unsigned long long>(simulation->tick()), QUICKSAVE_PATH);

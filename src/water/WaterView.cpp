@@ -98,12 +98,18 @@ Matrix WaterView::chunk_matrix(const WaterChunk& chunk, const float surface_y, c
     return MatrixMultiply(local, terrain);
 }
 
+void WaterView::set_area(const int size_x, const int size_z) {
+    chunks = water_chunk_layout(size_x, size_z, WATER_CHUNK_SIZE);
+}
+
+void WaterView::set_floor(std::vector<WaterChunk> rects, const float height) {
+    floor_rects = std::move(rects);
+    floor_height = height;
+}
+
 void WaterView::render() {
     const float surface_y = water_surface_height(level_source ? level_source() : 0);
     const Matrix terrain = terrain_matrix ? terrain_matrix() : MatrixIdentity();
-
-    const Vector4 colour_normalised = ColorNormalize(colour);
-    SetShaderValue(material.shader, colour_loc, &colour_normalised, SHADER_UNIFORM_VEC4);
 
     // The shader takes the wave as a wave number and an angular speed, which
     // saves it a division per vertex. A length or period of 0 stills the water.
@@ -112,9 +118,29 @@ void WaterView::render() {
     const float wave_speed = waves_on ? 2.0f * PI / wave_period : 0.0f;
     const float amplitude = waves_on ? wave_amplitude : 0.0f;
     SetShaderValue(material.shader, wave_time_loc, &wave_time, SHADER_UNIFORM_FLOAT);
-    SetShaderValue(material.shader, wave_amplitude_loc, &amplitude, SHADER_UNIFORM_FLOAT);
     SetShaderValue(material.shader, wave_number_loc, &wave_number, SHADER_UNIFORM_FLOAT);
     SetShaderValue(material.shader, wave_speed_loc, &wave_speed, SHADER_UNIFORM_FLOAT);
+
+    // Draws every square of `squares` the camera can see at height y. The
+    // colour and amplitude are whatever the shader was last given.
+    const auto draw_squares = [this, &terrain](const Frustum& frustum, const std::vector<WaterChunk>& squares,
+                                               const float y) {
+        size_t visible = 0;
+        for (const WaterChunk& chunk : squares) {
+            if (!frustum_contains_box(frustum, water_chunk_bounds(chunk, y))) continue;
+
+            // The same placement chunk_matrix() makes, as numbers, so the
+            // shader can find each vertex on the terrain for its wave
+            const Vector4 rect = {
+                chunk.x + chunk.width * 0.5f, chunk.z + chunk.depth * 0.5f,
+                chunk.width / WATER_CHUNK_SIZE, chunk.depth / WATER_CHUNK_SIZE,
+            };
+            SetShaderValue(material.shader, chunk_rect_loc, &rect, SHADER_UNIFORM_VEC4);
+            DrawMesh(chunk_mesh, material, chunk_matrix(chunk, y, terrain));
+            visible++;
+        }
+        return visible;
+    };
 
     BeginMode3D(*camera); {
         // Taken from rlgl rather than worked out from the camera again, so the
@@ -128,21 +154,20 @@ void WaterView::render() {
         // The plane has one side, and the camera can be taken below it
         rlDisableBackfaceCulling();
 
-        size_t visible = 0;
-        for (const WaterChunk& chunk : chunks) {
-            if (!frustum_contains_box(frustum, water_chunk_bounds(chunk, surface_y))) continue;
-
-            // The same placement chunk_matrix() makes, as numbers, so the
-            // shader can find each vertex on the terrain for its wave
-            const Vector4 rect = {
-                chunk.x + chunk.width * 0.5f, chunk.z + chunk.depth * 0.5f,
-                chunk.width / WATER_CHUNK_SIZE, chunk.depth / WATER_CHUNK_SIZE,
-            };
-            SetShaderValue(material.shader, chunk_rect_loc, &rect, SHADER_UNIFORM_VEC4);
-            DrawMesh(chunk_mesh, material, chunk_matrix(chunk, surface_y, terrain));
-            visible++;
+        // The sea floor first: it is opaque, and the water over it is not.
+        // Still, so it stays flat, and drawn with the water's own shader.
+        if (!floor_rects.empty()) {
+            const Vector4 floor_normalised = ColorNormalize(floor_colour);
+            const float still = 0.0f;
+            SetShaderValue(material.shader, colour_loc, &floor_normalised, SHADER_UNIFORM_VEC4);
+            SetShaderValue(material.shader, wave_amplitude_loc, &still, SHADER_UNIFORM_FLOAT);
+            draw_squares(frustum, floor_rects, floor_height);
         }
-        visible_last_frame = visible;
+
+        const Vector4 colour_normalised = ColorNormalize(colour);
+        SetShaderValue(material.shader, colour_loc, &colour_normalised, SHADER_UNIFORM_VEC4);
+        SetShaderValue(material.shader, wave_amplitude_loc, &amplitude, SHADER_UNIFORM_FLOAT);
+        visible_last_frame = draw_squares(frustum, chunks, surface_y);
 
         rlEnableBackfaceCulling();
     }

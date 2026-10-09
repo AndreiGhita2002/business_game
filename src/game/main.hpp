@@ -43,6 +43,13 @@ namespace global {
     inline std::unique_ptr<sim::Simulation> simulation;
     inline sim::CommandQueue commands;
 
+    // What the next new world is made from: its size in cells, edited in the
+    // game settings menu, and the seed of the one on screen now, which the
+    // readout shows so a good island can be made again
+    inline int world_cells_x = sim::DEFAULT_WORLD_CELLS;
+    inline int world_cells_y = sim::DEFAULT_WORLD_CELLS;
+    inline uint32_t world_seed = 0;
+
     // Game time not yet run as ticks, in seconds. Presentation state: the
     // simulation only ever learns "one more tick".
     inline float tick_accumulator = 0.0f;
@@ -70,6 +77,17 @@ namespace global {
     static void init();
     static void mainLoop();
     static void shutdown();
+
+    /**
+     * Fits everything drawn around the terrain to the simulation's: the map
+     * resized and drawn again, the shadow volume over the land, the water and
+     * the sea floor laid out, and the camera over the middle of the land.
+     * After a new world and after a load.
+     */
+    void start_world();
+
+    /** Replaces the game with a new world from `seed`, world_cells_x by world_cells_y. */
+    void new_world(uint32_t seed);
 
     /** Takes the script, starts it, and runs it every frame from then on. */
     Script* add_script(std::unique_ptr<Script> script);

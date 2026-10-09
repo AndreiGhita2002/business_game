@@ -80,11 +80,17 @@ needs nothing from the game side:
 - `test_sim_determinism.cpp` - the same game twice, a recorded log replayed, and
   the log written to bytes and replayed, all agreeing on the checksum every
   tick; and the checksum noticing a different seed, a different speed, and
-  different slot bookkeeping.
+  different slot bookkeeping. Played on a small world of ocean, as an island
+  is a megabyte to hash every tick.
 - `test_sim_terrain.cpp` - the fixed point Perlin noise, the block grid and its
-  height queries, generated columns (stone, dirt, grass on top), the terrain
-  round tripping and damaged bytes refused, and the terrain in the checksum and
-  the `TERR` save section.
+  height queries, ocean cells (a sea floor until written to), the default
+  world (ocean round one island in the middle), world sizes and the limit,
+  stone under the water, the terrain round tripping and damaged bytes refused,
+  and the terrain in the checksum and the `TERR` save section.
+- `test_sim_island.cpp` - footprints and their turns, specs drawn from a seed,
+  centring, placement refused off the world or over land, the same island
+  wherever it is put, the coast meeting the ocean at the sea floor, relief by
+  elevation with the slope limit, and each biome's top blocks.
 
 A CTest entry, `sim_uses_no_floating_point` (`cmake/CheckSimNoFloats.cmake`),
 fails if the word `float` or `double` appears anywhere under `src/sim`, comments
@@ -114,13 +120,16 @@ The game side:
   terrain's transform, and the waves through `water_wave_height()`, the twin
   of the vertex shader's. The `WaterView` itself needs
   a GL context and is never built.
-- `test_terrain_voxels.cpp` - `entity/TerrainVoxels`: each block type's voxels,
-  which blocks get lowered edges and trims, what each does to the voxels
-  (grass following a lowered edge, a trim stopping over a lowered floor edge),
-  a terrain drawn into a `VoxelMap`, and `sim::PerlinNoise` checked against
+- `test_terrain_voxels.cpp` - `entity/TerrainVoxels`: each block type's voxels
+  and its colour in the palette, which blocks get lowered edges and trims,
+  what each does to the voxels (grass following a lowered edge, a trim
+  stopping over a lowered floor edge), a terrain drawn into a `VoxelMap`, only
+  its land cells making chunks, the sparse map's chunks and remeshing, and
+  `sim::PerlinNoise` checked against
   `siv::PerlinNoise` (same permutation, values within 1e-3), which only this
   side may include.
-- `TestHelpers.hpp` - a palette, a self-deleting temp directory, and the
+- `TestHelpers.hpp` - a palette, a self-deleting temp directory, `voxel_at()`
+  (a voxel read with a missing map chunk as air), and the
   `REQUIRE_VEC3_EQ` / `REQUIRE_QUAT_EQ` / `REQUIRE_TRANSFORM_EQ` comparisons.
   Include it **first** in a test file: `raymath.h` redefines raylib's vector
   types unless `raylib.h` is in ahead of it, and this header gets that order
@@ -183,7 +192,7 @@ the simulation after a load.
 - A 12 byte header (`BGSV`, `SAVE_FORMAT_VERSION`, section count), then one
   section per system: `u32 tag, u32 version, u32 payload_bytes, payload`. The
   sections are `CORE` (tick, Rng and water level, version 2), `TERR` (the
-  blocks, raw), `ROUT`, `VEHI` and `CMDS` (the
+  cells, a land cell's blocks raw, version 2), `ROUT`, `VEHI` and `CMDS` (the
   `CommandQueue`: waiting commands and the next sequence number, so they run on
   the first tick after the load).
 - **No migration.** A section of another version, an unknown section, a
@@ -203,32 +212,51 @@ the simulation after a load.
 - In the game, F5 saves to `saves/quicksave.bgsave` (git ignored) and F9 loads
   it, both handled at the start of `mainLoop()`, between ticks. A load is
   assigned into the existing `global::simulation` and `global::commands`, as
-  the vehicle panel points at both, after `EntityManager::clear()`, and the
-  map's voxels are redrawn from the loaded terrain. A failed
+  the vehicle panel points at both, after `EntityManager::clear()`, and
+  `start_world()` fits the map, water and camera to the loaded terrain. A failed
   load leaves the game as it was. The readout shows how either went. A save
   menu is a `TODO (ui)` next to `QUICKSAVE_PATH`.
 
-**Terrain** (`sim/Terrain.cpp/hpp`, `sim/Noise.cpp/hpp`) is the simulation's:
-a 3D grid of blocks (`sim::BlockType`: air, stone, dirt, grass), x and y across,
-z up, each `BLOCK_SIZE` units on a side. It is the gameplay grid.
+**Terrain** (`sim/Terrain.cpp/hpp`, `sim/Island.cpp/hpp`, `sim/Noise.cpp/hpp`)
+is the simulation's: a 3D grid of blocks (`sim::BlockType`: air, stone, dirt,
+grass, and for the islands' biomes sand, sandstone, snow and gravel), x and y
+across, z up, each `BLOCK_SIZE` units on a side. It is the gameplay grid. See
+`docs/terrain.md` for the design it follows.
 
-- `generate_terrain(TerrainSettings)` takes one noise sample per column, at its
-  middle, and scales it so a sample of 1 stands `hill_height` blocks tall,
-  cut off at the top of the world. The top
-  block is grass, `dirt_depth` blocks of dirt under it, stone below that, and
-  every column keeps at least its bottom block. Every block wholly under the
-  water (`block_under_water()`: its top no higher than `water_level + 1`) is
-  stone instead, a sea floor; `TerrainSettings::water_level` says which level,
-  and `Simulation(seed, settings)` starts the water there.
-  `DEFAULT_WATER_LEVEL` / `MIN_WATER_LEVEL` live in `Terrain.hpp` for that
-  reason. The defaults are 32x32x32 blocks
-  (128 voxels on every side) from seed 123456, the old voxel terrain's seed.
-- **Slopes:** the steepest a slope gets is roughly `hill_height *
-  noise_scale` blocks per block, so the two together set it. The default hill
-  height of 8 (with `noise_scale` 1/5) tops out at 6 blocks with about 5% of
-  neighbouring columns more than a block apart; 32 reached 23 blocks with 41%.
-  For tall and gentle, lower `noise_scale` as well (1/10 with 16: 11 blocks,
-  7%), which spreads the same landscape out.
+- **Cells.** The world is `cells_x` by `cells_y` cells, each `CELL_BLOCKS`
+  (64) blocks across, and the world is 64 blocks tall: 256 voxels a cell.
+  `TerrainSettings::cells_x/y` set the size, `DEFAULT_WORLD_CELLS` (10) by
+  default and at most `MAX_WORLD_CELLS` (32) a side, which is set by what the
+  presentation walks every frame rather than by memory.
+- **Ocean cells take no memory.** A cell nothing has written to is ocean,
+  `SEA_FLOOR_BLOCKS` (2) of stone under every column and air above, and holds
+  no blocks. Writing anything else into one gives it blocks of its own, the
+  sea floor copied in first (`set()`); `reset_cell()` makes it ocean again.
+  Every query answers the same either way. `Terrain::of_blocks(x, y, z)` is a
+  small terrain of air, each column its own cell, which the tests build by hand.
+- **Water.** `DEFAULT_WATER_LEVEL` is 15, the top at 16 units, four blocks up:
+  two blocks of water over the sea floor. Every block wholly under the water
+  (`block_under_water()`: its top no higher than `water_level + 1`) is
+  stone; `TerrainSettings::water_level` says which level, and
+  `Simulation(seed, settings)` starts the water there.
+  `DEFAULT_WATER_LEVEL` / `MIN_WATER_LEVEL` live in `Terrain.hpp` for that reason.
+- `generate_terrain(TerrainSettings)` makes the ocean and, unless
+  `centre_island` is off, one island in the middle drawn from `seed`
+  (`random_island_spec()`), turned until it fits. `cells_x` of 0 makes no
+  terrain at all, which is what a load starts from.
+- **Islands** (`sim/Island.hpp`, its header comment has the steps). An
+  `IslandSpec` is a shape (the tetrominoes: square, line, L, T, zigzag), a
+  quarter turn, an elevation (flat, hilly, mountainous), a biome (grassland,
+  desert, snowy) and a noise seed, and generates the same island wherever it
+  is put (`place_island()`, which refuses a footprint off the world, over
+  land, or on cells smaller than `CELL_BLOCKS`). In integers and `Fixed`: a
+  chamfer distance to the footprint's edge, a coast `ISLAND_COAST_MARGIN` in
+  from it wobbled by noise, relief by elevation (octave noise, ridged for
+  mountains) ramped in from the beach, then a slope limit (a block a step, two
+  in the mountains), with the columns within `ISLAND_EDGE_FLOOR` of the edge
+  pinned to the sea floor so an island always meets the ocean round it. The
+  biome picks the top block and what is under it; beaches are sand (gravel
+  when snowy), and high grassland goes to rock and then snow.
 - `sim::PerlinNoise` is a port of `siv::PerlinNoise` (`includes/`) to `Fixed`:
   the same permutation from the same seed (it shuffles with `std::mt19937` and
   a plain modulo, both exactly specified) and the same maths, so it agrees with
@@ -236,7 +264,9 @@ z up, each `BLOCK_SIZE` units on a side. It is the gameplay grid.
   z = 0.34567, as siv's `noise2D()` does.
 - `Simulation(seed, TerrainSettings)` generates it, `World::terrain` holds it,
   `Simulation::terrain()` reads it, and it is in `write_state()` and so in the
-  checksum. Nothing changes it after generation yet: there is no command for it.
+  checksum (a land cell is a quarter of a megabyte, written in one copy).
+  Nothing changes it after generation yet: there is no command for it, and an
+  island bought during play would want one (`PlaceIsland`).
 - `column_height()` (blocks) and `ground_level()` (units, for a point) are
   what anything that sits on the ground asks.
 
@@ -247,11 +277,15 @@ square root), and a vehicle drives round one at a fixed speed per tick.
 **Presentation of the simulation** (`src/entity`):
 
 - `TerrainVoxels` draws the terrain into the `VoxelMap`, each block as a cube
-  of `BLOCK_VOXELS` (= `sim::BLOCK_SIZE`, 4) voxels a side: stone grey, dirt
-  brown, grass brown with the top voxel of each column green (`block_voxel()`).
-  The VoxelView is built at `terrain_voxel_size()`, and `build_terrain_voxels()`
-  empties the map, writes every block and marks every chunk dirty. A terrain
-  bigger than the map is cut off, and reported.
+  of `BLOCK_VOXELS` (= `sim::BLOCK_SIZE`, 4) voxels a side: grass brown with
+  the top voxel of each column green, every other block its own colour all
+  through (`block_voxel()`; ids 14 to 17 in the map's palette for sand,
+  sandstone, snow and gravel). The VoxelView is built at
+  `terrain_voxel_size()`, and `build_terrain_voxels()` clears the map and
+  writes the **land cells only**, up to the top of each column, straight into
+  chunks it makes as it goes. Ocean cells are left out: the WaterView draws
+  their sea floor as a plane, which is what keeps a world map's chunks down to
+  its islands. A terrain bigger than the map is cut off, and reported.
 - **Block detail**, purely visual, from each block's four side neighbours and
   the blocks above and below it (`block_detail()` -> `BlockDetail`, side
   masks `SIDE_X_POS` and so on). It softens the block grid without hiding it:
@@ -277,8 +311,8 @@ square root), and a vehicle drives round one at a fixed speed per tick.
   smooth (at the cost of being up to a tick behind).
 - `EntityManager` realises an entity for every vehicle within
   `realize_radius` of the camera and drops it past `unrealize_radius` (two
-  radii, so the boundary does not flicker; 448 and 512 by default, which
-  covers the whole 128 voxel map). A vehicle without an entity keeps
+  radii, so the boundary does not flicker; 448 and 512 by default). A vehicle
+  without an entity keeps
   driving; when the camera comes back it reappears exactly where the
   simulation has it. Nothing flows back into the simulation.
 - **Vehicles are scaled to fit a block.** As it realises one, the manager
@@ -321,7 +355,7 @@ The UI/scene uses a `ViewNode` tree hierarchy with recursive update/render trave
 ### Voxel System
 
 **VoxelGrid** (abstract base in `src/voxel/VoxelGrid.hpp`) has two implementations:
-- **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks keyed by `Int3`), any number of chunks tall (`get_height()`; the game's is 128 voxels, 8 chunks). It starts as air: the terrain is the simulation's, drawn in by `entity/TerrainVoxels`
+- **VoxelMap** (`src/voxel/VoxelMap.cpp/hpp`) - Chunk-based storage (16x16x16 chunks keyed by `Int3`), any number of chunks tall (`get_height()`; the game's is 256 voxels, 16 chunks), the size of the whole world (2560 voxels across by default). **Sparse**: a chunk only exists once something is written to it (`ensure_chunk()`, which `write_voxel()` calls; air into a missing chunk does nothing), and `get_voxel()` is null where there is none, so read through `is_solid()` or check for null. `clear()` drops every chunk and its model, `resize()` is a new size of air. It starts as air: the terrain is the simulation's, drawn in by `entity/TerrainVoxels`. A write on a chunk's border remeshes only the neighbours that exist.
 - **SingleChunkGrid** (`src/voxel/SingleChunkGrid.cpp/hpp`) - Single chunk for the voxel editor
 
 **VoxelMesher** (`src/voxel/VoxelMesher.cpp/hpp`) converts voxel data to 3D
@@ -348,7 +382,15 @@ texture, one byte each, for the lighting shader to trace shadow rays through.
 `VoxelMap::update_volume()` uploads the chunks that have changed, tracked by
 `chunk_volume_dirty` because the mesh and the volume are brought up to date by
 different calls. This is the one file that calls OpenGL directly: rlgl has no 3D
-textures. The texture is the whole map, but the shader is told it ends at
+textures. The texture is a **window** of the map, not all of it - a world is
+far bigger than a 3D texture can be. `VoxelView::set_volume_window()` puts it
+over the land (`start_world()` in `main.cpp` hands it the box round the land
+cells, as tall as the land), at most `MAX_WORLD_VOLUME_SIDE` (1024) across,
+whole chunks, z from 0. `world_volume_origin` is where it starts:
+`update_volume()` uploads a chunk at its place less that origin and skips one
+outside, and `bindWorldVolume()` puts a translation by minus the origin after
+the map's inverse, so the shader and its C++ twin are unchanged. Outside the
+window nothing casts a shadow. The shader is told it ends at
 `VoxelView::world_volume_top`, the map's `solid_top()` (one above its highest
 solid layer), refreshed whenever `update_volume()` uploads anything. Nothing
 above that can block a ray, so a ray leaving the shorter box is exactly as lit,
@@ -570,7 +612,7 @@ knows it exists. `main.cpp` is the one place the two meet (the map's size, the
 VoxelView's camera and the map's world matrix are handed in).
 
 The **level is the simulation's**: `sim::World::water_level`, an `int32_t`
-voxel layer (`DEFAULT_WATER_LEVEL` 4, one unit over the lowest ground, never below `MIN_WATER_LEVEL` 0), changed
+voxel layer (`DEFAULT_WATER_LEVEL` 15, two blocks over the sea floor, never below `MIN_WATER_LEVEL` 0), changed
 only by the `SetWaterLevel` command, in `write_state()` and so in the checksum,
 and saved in `CORE`. Nothing in the simulation reads it yet.
 
@@ -590,10 +632,17 @@ and saved in `CORE`. Nothing in the simulation reads it yet.
   map's chunks are drawn through in `voxel_model_matrix()`. Moving, turning or
   scaling the map carries the water with it. `WaterView::chunk_matrix()` is the
   testable half.
-- Cut into `WATER_CHUNK_SIZE` (16) squares by `water_chunk_layout()`. They are
+- Cut into `WATER_CHUNK_SIZE` (64) squares by `water_chunk_layout()`, 1600
+  of them over the default world. They are
   all the same square, so there is **one shared mesh** (`GenMeshPlane`, a quad
   per unit so a wave shader has vertices to move) drawn once per chunk with
   that chunk's matrix; edge chunks that are cut short are drawn scaled down.
+  `set_area()` lays them out again for a world of another size.
+- **The sea floor** of the ocean cells, which the voxel map does not hold, is
+  drawn here too: `set_floor()` takes a square per ocean cell and a height
+  (`start_world()` hands in the sea floor's top), drawn first, opaque in
+  `floor_colour`, through the same mesh, shader and culling with the waves
+  stilled. Unlit, so its colour is a stand-in for lit stone.
 - Only chunks inside the camera's frustum are drawn: `game/Frustum` extracts
   the planes from terrain x `rlGetMatrixModelview()` x `rlGetMatrixProjection()`
   inside the 3D block, so the culling always agrees with what `BeginMode3D()`
@@ -660,7 +709,9 @@ Hand-rolled retained-mode UI in `src/ui`:
   `simulation->water_level()` and submits `SetWaterLevel`. The second is the
   vehicle distance (16 to 1024), the `EntityManager`'s realise radius, with the
   unrealise radius kept `UNREALIZE_MARGIN` beyond it. It is a getter/setter
-  row rather than a pointer, as the entities are freed before the panel.
+  row rather than a pointer, as the entities are freed before the panel. The
+  last two are "world cells x/y" (1 to `sim::MAX_WORLD_CELLS`), the size of
+  the next world "New Island" makes; they change nothing until then.
 
 The sun's keybind (U) is mirrored by a button in the bottom left, and its angle
 in the sky by the shader menu rows; both write the same light. The camera
@@ -739,12 +790,19 @@ Each frame, `mainLoop()` runs whole ticks out of `global::tick_accumulator`
 (at most `MAX_TICKS_PER_FRAME`, dropping the time past that), calling
 `EntityManager::on_tick()` after each step, then `EntityManager::present()`
 with the leftover fraction of a tick, then the scripts, then the view tree.
-`global::game_speed` scales game time (0 pauses). `init()` queues a test
-scenario (`queue_test_scenario()`): two loops of road following the
-simulation's terrain (`Terrain::ground_level()`) and
-a dozen cars, two of them driving backwards. A readout under the title shows the
-tick, the ticks run that frame, and vehicles in the simulation against vehicles
-drawn.
+`global::game_speed` scales game time (0 pauses). There is no test scenario
+any more (the routes and cars are gone; the commands still work). `init()`
+makes a world from a fresh seed (`std::random_device`), `world_cells_x` by
+`world_cells_y` cells, so every start is a different island, and
+`start_world()` fits everything drawn to the simulation's terrain: the map
+resized and drawn, the shadow window over the land, the water's area and the
+ocean cells' sea floor, and the camera over the middle of the land. It runs
+after a load too. The "New Island" button (bottom left) calls `new_world()`,
+which replaces the game as a load does; the game settings menu's "world cells
+x/y" rows set the size it uses. A readout under the title shows the tick, the
+ticks run that frame, vehicles in the simulation against vehicles drawn, and
+the world's seed, shape, elevation and biome ("loaded game" after a load, as
+the seed is not saved).
 
 Shutdown order matters: scripts, then entities (their grids are still in the
 VoxelView, which takes them back), then the shader, the view tree - whose
@@ -794,8 +852,19 @@ take the narrow header instead of dragging in the window and the view tree.
 - A placeholder car is five grids, so it takes five shadow atlas slots (256 in
   all) and five of a draw call's `MAX_GRID_VOLUMES` (8) casters. Two cars side
   by side already overflow that, and the casters past the eighth cast no shadow
-  on that draw. Fine for the test scenario; a real fleet wants either one brick
-  per vehicle or a larger cap.
+  on that draw. A real fleet wants either one brick per vehicle or a larger cap.
+- An island is thousands of voxel chunks (a two by two mountainous one is up to
+  about 12000, most of them buried and never drawn), all meshed on the first
+  frame after `start_world()`, and every one on the surface is a draw call.
+  Greedy meshing and chunk-level culling are what would bring both down.
+- The sea floor plane is unlit, so it does not match lit stone exactly where
+  an ocean cell meets an island's own sea floor; and it is not a grid, so the
+  editor cannot pick it.
+- The camera keeps its old speed (24 units a second), which crosses a 2560
+  voxel world in under two minutes.
+- `TestHelpers`' `TempDir` names its directories from a counter per process,
+  so two test processes run in parallel (`ctest -j`) can collide on
+  `business_game_tests_0`. Serial runs are fine.
 - Moving an entity's root grid with the GridTransformMenu does nothing lasting:
   the next `present()` puts it back where the simulation says.
 - `apply_transform_rot()` composes two rotations with `QuaternionAdd`, where

@@ -15,6 +15,10 @@
 
 using Catch::Approx;
 
+// Half a side of the shared chunk mesh, which is centred on the origin: where
+// its corners are before chunk_matrix() places it
+constexpr float MESH_HALF = WATER_CHUNK_SIZE / 2.0f;
+
 TEST_CASE("a whole number of chunks covers the area exactly", "[water]") {
     const auto chunks = water_chunk_layout(128, 64, 16);
     REQUIRE(chunks.size() == 8 * 4);
@@ -156,14 +160,14 @@ TEST_CASE("a chunk sits where it is laid out when the terrain is at the origin",
     // The shared mesh is centred on the origin, so its centre lands on the
     // chunk's centre and its corner on the chunk's corner
     REQUIRE_VEC3_EQ(Vector3Transform(Vector3{0, 0, 0}, m), (Vector3{40.0f, 1.875f, 24.0f}));
-    REQUIRE_VEC3_EQ(Vector3Transform(Vector3{-8, 0, -8}, m), (Vector3{32.0f, 1.875f, 16.0f}));
+    REQUIRE_VEC3_EQ(Vector3Transform(Vector3{-MESH_HALF, 0, -MESH_HALF}, m), (Vector3{32.0f, 1.875f, 16.0f}));
 }
 
 TEST_CASE("a chunk cut short is scaled to fit", "[water]") {
     const WaterChunk chunk{16.0f, 0.0f, 4.0f, 8.0f};
     const Matrix m = WaterView::chunk_matrix(chunk, 0.0f, MatrixIdentity());
-    REQUIRE_VEC3_EQ(Vector3Transform(Vector3{-8, 0, -8}, m), (Vector3{16.0f, 0.0f, 0.0f}));
-    REQUIRE_VEC3_EQ(Vector3Transform(Vector3{8, 0, 8}, m), (Vector3{20.0f, 0.0f, 8.0f}));
+    REQUIRE_VEC3_EQ(Vector3Transform(Vector3{-MESH_HALF, 0, -MESH_HALF}, m), (Vector3{16.0f, 0.0f, 0.0f}));
+    REQUIRE_VEC3_EQ(Vector3Transform(Vector3{MESH_HALF, 0, MESH_HALF}, m), (Vector3{20.0f, 0.0f, 8.0f}));
 }
 
 TEST_CASE("the water moves, turns and scales with the terrain", "[water]") {
@@ -180,11 +184,11 @@ TEST_CASE("the water moves, turns and scales with the terrain", "[water]") {
     const Matrix m = WaterView::chunk_matrix(chunk, surface, terrain);
 
     const Vector3 corner_in_terrain{16.0f, surface, 32.0f};
-    REQUIRE_VEC3_EQ(Vector3Transform(Vector3{-8, 0, -8}, m), Vector3Transform(corner_in_terrain, terrain));
+    REQUIRE_VEC3_EQ(Vector3Transform(Vector3{-MESH_HALF, 0, -MESH_HALF}, m), Vector3Transform(corner_in_terrain, terrain));
 }
 
 TEST_CASE("culling in the terrain's space follows the terrain", "[water]") {
-    const auto chunks = water_chunk_layout(128, 128, WATER_CHUNK_SIZE);
+    const auto chunks = water_chunk_layout(4 * WATER_CHUNK_SIZE, 4 * WATER_CHUNK_SIZE, WATER_CHUNK_SIZE);
     const float surface = water_surface_height(1);
 
     // Looking straight down at the terrain's origin, about 23 units across
@@ -204,10 +208,10 @@ TEST_CASE("culling in the terrain's space follows the terrain", "[water]") {
         REQUIRE_FALSE(frustum_contains_box(after_move, water_chunk_bounds(c, surface)));
     }
 
-    // Slid 64 units the other way, the chunk under the camera is the one 64
-    // units into the map
-    const Matrix shifted = MatrixTranslate(-64.0f, 0.0f, 0.0f);
+    // Slid two chunks the other way, the chunk under the camera is the third
+    // one along the first row
+    const Matrix shifted = MatrixTranslate(-2.0f * WATER_CHUNK_SIZE, 0.0f, 0.0f);
     const Frustum shifted_f = frustum_from_matrix(MatrixMultiply(shifted, view_projection));
     REQUIRE_FALSE(frustum_contains_box(shifted_f, water_chunk_bounds(chunks[0], surface)));
-    REQUIRE(frustum_contains_box(shifted_f, water_chunk_bounds(chunks[4], surface)));
+    REQUIRE(frustum_contains_box(shifted_f, water_chunk_bounds(chunks[2], surface)));
 }

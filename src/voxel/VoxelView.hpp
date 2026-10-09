@@ -31,6 +31,11 @@
 // once there are more vehicles crowded around one chunk than this allows.
 #define MAX_GRID_VOLUMES 8
 
+// The largest the world volume's window is made along x and y, in voxels.
+// 1024 by 1024 by a map 256 tall is 256 MiB at a byte a voxel; an island of
+// four cells in a line, the longest there is, is exactly 1024 long.
+#define MAX_WORLD_VOLUME_SIDE 1024
+
 /**
  * Called with the grids that are about to stop being drawn and be deleted, so
  * anything holding a pointer to one (a menu's selection, say) can let go.
@@ -48,8 +53,12 @@ public:
     VoxelMap* game_map;
 
     // The map's voxels on the GPU, which is what the lighting shader walks when
-    // it traces a shadow ray.
+    // it traces a shadow ray. A window of the map rather than all of it, from
+    // world_volume_origin (voxels, whole chunks, z always 0): a whole world is
+    // far bigger than a 3D texture can be. Outside it nothing casts a shadow.
+    // set_volume_window() moves it.
     VoxelVolume world_volume;
+    Int3 world_volume_origin{0, 0, 0};
     // How much of it, from the bottom up, holds anything: the map's
     // solid_top(), refreshed whenever a chunk is uploaded. The shader is told
     // the volume ends there, so a shadow ray stops at the top of the ground
@@ -93,6 +102,15 @@ public:
     void remove_grids(const std::vector<VoxelGrid*>& grids) override;
 
     void add_grid_removal_listener(GridRemovalListener listener);
+
+    /**
+     * Puts the shadow volume over the map's voxels from `origin` to `origin +
+     * size`, in voxels, both brought out to whole chunks and kept inside the
+     * map, with z running from the bottom of the map. The volume is made
+     * again, empty, and every chunk of the map is marked to go back into it.
+     * Needs the GL context.
+     */
+    void set_volume_window(Int3 origin, Int3 size);
 
     // Helper Functions
     bool isInRenderDistance(Vector3 v) const;

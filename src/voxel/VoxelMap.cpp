@@ -16,12 +16,7 @@
 VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y, const uint32_t size_z)
     : VoxelGrid(view)
 {
-    this->size = Int2(size_x, size_y);
-    this->height = static_cast<int>(size_z);
-    this->chunk_count = Int3(
-        size_x / CHUNK_SIZE + (size_x % CHUNK_SIZE ? 1 : 0),
-        size_y / CHUNK_SIZE + (size_y % CHUNK_SIZE ? 1 : 0),
-        size_z / CHUNK_SIZE + (size_z % CHUNK_SIZE ? 1 : 0));
+    resize(size_x, size_y, size_z);
 
     this->transform = identity();
 
@@ -49,25 +44,52 @@ VoxelMap::VoxelMap(VoxelView* view, const uint32_t size_x, const uint32_t size_y
     colorMap->insert(std::pair<VoxelID, Color>(12, BLACK));
     // Stone, STONE_VOXEL
     colorMap->insert(std::pair<VoxelID, Color>(13, GRAY));
+    // The islands' other blocks, see entity/TerrainVoxels.hpp
+    colorMap->insert(std::pair<VoxelID, Color>(14, Color{222, 200, 140, 255}));  // sand
+    colorMap->insert(std::pair<VoxelID, Color>(15, Color{196, 150, 96, 255}));   // sandstone
+    colorMap->insert(std::pair<VoxelID, Color>(16, Color{240, 244, 250, 255}));  // snow
+    colorMap->insert(std::pair<VoxelID, Color>(17, Color{122, 118, 112, 255}));  // gravel
 
-    this->chunks = std::map<Int3, VoxelChunk>();
-    for (int ix = 0; ix < chunk_count.x; ++ix) {
-        for (int iy = 0; iy < chunk_count.y; ++iy) {
-            for (int iz = 0; iz < chunk_count.z; ++iz) {
-                const Int3 chunk_pos(ix, iy, iz);
-                chunks[chunk_pos] = VoxelChunk{};
-                chunk_was_updated[chunk_pos] = true;
-                chunk_volume_dirty[chunk_pos] = true;
-            }
-        }
-    }
+    // No chunks: they are made as they are first written to
 }
 
 VoxelMap::~VoxelMap() {
+    clear();
+}
+
+VoxelChunk& VoxelMap::ensure_chunk(const Int3 chunk_pos) {
+    const auto found = chunks.find(chunk_pos);
+    if (found != chunks.end()) return found->second;
+
+    VoxelChunk& chunk = chunks[chunk_pos];
+    chunk.fill(0);
+    chunk_was_updated[chunk_pos] = true;
+    chunk_volume_dirty[chunk_pos] = true;
+    // Its neighbours' meshes were made with air where it is, which is still
+    // right until something solid is written into it, and that write marks
+    // them itself (write_voxel()). Something writing straight into the chunk
+    // instead marks what it needs.
+    return chunk;
+}
+
+void VoxelMap::clear() {
     for (auto it = chunk_models.begin(); it != chunk_models.end(); ++it) {
         unload_chunk_model(it->second.model);
     }
     chunk_models.clear();
+    chunks.clear();
+    chunk_was_updated.clear();
+    chunk_volume_dirty.clear();
+}
+
+void VoxelMap::resize(const uint32_t size_x, const uint32_t size_y, const uint32_t size_z) {
+    clear();
+    this->size = Int2(size_x, size_y);
+    this->height = static_cast<int>(size_z);
+    this->chunk_count = Int3(
+        size_x / CHUNK_SIZE + (size_x % CHUNK_SIZE ? 1 : 0),
+        size_y / CHUNK_SIZE + (size_y % CHUNK_SIZE ? 1 : 0),
+        size_z / CHUNK_SIZE + (size_z % CHUNK_SIZE ? 1 : 0));
 }
 
 std::string & VoxelMap::get_grid_type() {
@@ -131,17 +153,18 @@ VoxelGrid* VoxelMap::load_body(std::istream& in, const voxel_file::LoadContext& 
             delete map;
             return nullptr;
         }
-        // Only the chunks the map was made with: one outside it would be
-        // meshed and drawn, but never reachable through get_voxel()
+        // Only chunks inside the map: one outside it would be meshed and
+        // drawn, but never reachable through get_voxel()
         const Int3 chunk_pos{chunk_x, chunk_y, chunk_z};
-        const auto chunk = map->chunks.find(chunk_pos);
-        if (chunk == map->chunks.end()) {
+        const Int3 count = map->get_chunk_count();
+        if (chunk_x < 0 || chunk_x >= count.x || chunk_y < 0 || chunk_y >= count.y ||
+            chunk_z < 0 || chunk_z >= count.z) {
             TraceLog(LOG_WARNING, "VOXELMAP: file holds chunk %i %i %i, outside the map",
                      chunk_x, chunk_y, chunk_z);
             delete map;
             return nullptr;
         }
-        if (!voxel_file::read_chunk(in, &chunk->second)) {
+        if (!voxel_file::read_chunk(in, &map->ensure_chunk(chunk_pos))) {
             delete map;
             return nullptr;
         }
@@ -216,24 +239,33 @@ void VoxelMap::update_models() {
     }
 }
 
-bool VoxelMap::update_volume(VoxelVolume& volume) {
+bool VoxelMap::update_volume(VoxelVolume& volume, const Int3 window_origin) {
     if (!volume.is_created()) return false;
 
+    const Int3 window_size = volume.get_size();
     bool uploaded = false;
     for (auto& [chunk_pos, dirty] : chunk_volume_dirty) {
         if (!dirty) continue;
+        dirty = false;
 
         const auto chunk = chunks.find(chunk_pos);
         if (chunk == chunks.end()) continue;
 
         // Chunk (cx, cy, cz) starts at voxel 16 * (cx, cy, cz), which is where
-        // update_models() meshes it. The map's own transform is not baked in
-        // here either: the shader undoes it when it turns a world position
-        // into a voxel coordinate.
-        volume.upload_chunk(
-            Int3{chunk_pos.x * CHUNK_SIZE, chunk_pos.y * CHUNK_SIZE, chunk_pos.z * CHUNK_SIZE},
-            chunk->second);
-        dirty = false;
+        // update_models() meshes it, and the window moves that back by its
+        // origin. The map's own transform is not baked in here either: the
+        // shader undoes it when it turns a world position into a voxel
+        // coordinate.
+        const Int3 at{
+            chunk_pos.x * CHUNK_SIZE - window_origin.x,
+            chunk_pos.y * CHUNK_SIZE - window_origin.y,
+            chunk_pos.z * CHUNK_SIZE - window_origin.z,
+        };
+        if (at.x < 0 || at.y < 0 || at.z < 0 || at.x + CHUNK_SIZE > window_size.x ||
+            at.y + CHUNK_SIZE > window_size.y || at.z + CHUNK_SIZE > window_size.z)
+            continue;
+
+        volume.upload_chunk(at, chunk->second);
         uploaded = true;
     }
     return uploaded;
@@ -279,17 +311,22 @@ bool VoxelMap::in_bounds(const Int3 grid_pos) const {
 bool VoxelMap::write_voxel(const Int3 grid_pos, const VoxelID id) {
     if (!in_bounds(grid_pos)) return false;
 
-    VoxelID* voxel = get_voxel(grid_pos);
-    if (voxel == nullptr) return false;
-
-    *voxel = id;
-    // The chunk's mesh and its place in the shadow volume are both a voxel out
-    // of date now
     const Int3 chunk_pos{
         floordiv(grid_pos.x, CHUNK_SIZE),
         floordiv(grid_pos.y, CHUNK_SIZE),
         floordiv(grid_pos.z, CHUNK_SIZE)
     };
+    // Air into a chunk that does not exist is already there
+    if (id == 0 && chunks.find(chunk_pos) == chunks.end()) return true;
+
+    VoxelChunk& chunk = ensure_chunk(chunk_pos);
+    *get_chunk_voxel(chunk, Int3{
+        floormod(grid_pos.x, CHUNK_SIZE),
+        floormod(grid_pos.y, CHUNK_SIZE),
+        floormod(grid_pos.z, CHUNK_SIZE),
+    }) = id;
+    // The chunk's mesh and its place in the shadow volume are both a voxel out
+    // of date now
     chunk_was_updated[chunk_pos] = true;
     chunk_volume_dirty[chunk_pos] = true;
 

@@ -61,7 +61,7 @@ constexpr uint32_t SECTION_CORE = section_tag("CORE");      // the tick, the Rng
 // 2: the water level after the Rng
 constexpr uint32_t SECTION_CORE_VERSION = 2;
 constexpr uint32_t SECTION_TERRAIN = section_tag("TERR");   // the blocks
-constexpr uint32_t SECTION_TERRAIN_VERSION = 1;
+constexpr uint32_t SECTION_TERRAIN_VERSION = 2;
 constexpr uint32_t SECTION_ROUTES = section_tag("ROUT");
 constexpr uint32_t SECTION_ROUTES_VERSION = 1;
 constexpr uint32_t SECTION_VEHICLES = section_tag("VEHI");

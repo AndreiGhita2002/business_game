@@ -58,6 +58,13 @@ constexpr int BLOCK_VOXELS = sim::BLOCK_SIZE;
 constexpr VoxelID STONE_VOXEL = 13;   // GRAY
 constexpr VoxelID DIRT_VOXEL = 7;     // BROWN
 constexpr VoxelID GRASS_VOXEL = 2;    // DARKGREEN
+constexpr VoxelID SAND_VOXEL = 14;
+constexpr VoxelID SANDSTONE_VOXEL = 15;
+constexpr VoxelID SNOW_VOXEL = 16;
+constexpr VoxelID GRAVEL_VOXEL = 17;
+
+// A block is drawn into a single chunk, which build_terrain_voxels() leans on
+static_assert(CHUNK_SIZE % BLOCK_VOXELS == 0, "a block would straddle two chunks");
 
 // The four sides of a block, as bits of BlockDetail's masks
 constexpr uint8_t SIDE_X_POS = 1;
@@ -86,9 +93,9 @@ BlockDetail block_detail(const sim::Terrain& terrain, int32_t x, int32_t y, int3
 
 /**
  * The voxel at `in_block` (each axis 0 to BLOCK_VOXELS - 1, z up) of a block
- * of `type` drawn with `detail`. Stone is grey and dirt brown all through;
- * grass is dirt with the top voxel of each column green. Air is 0 but for its
- * trims. An empty detail is the plain cube.
+ * of `type` drawn with `detail`. Grass is dirt with the top voxel of each
+ * column green; every other block is its own colour all through. Air is 0
+ * but for its trims. An empty detail is the plain cube.
  */
 VoxelID block_voxel(sim::BlockType type, const BlockDetail& detail, Int3 in_block);
 
@@ -96,9 +103,12 @@ VoxelID block_voxel(sim::BlockType type, const BlockDetail& detail, Int3 in_bloc
 Int3 terrain_voxel_size(const sim::Terrain& terrain);
 
 /**
- * Empties the map and draws `terrain` into it, block (x, y, z) at voxels
- * BLOCK_VOXELS * (x, y, z) onwards. Every chunk is marked for remeshing and
- * for its shadow volume.
+ * Empties the map and draws `terrain`'s land cells into it, block (x, y, z) at
+ * voxels BLOCK_VOXELS * (x, y, z) onwards. Ocean cells are left out: they are
+ * a flat sea floor and nothing else, which the WaterView draws as a plane
+ * rather than as chunks of voxels, and leaving them out is what keeps a world
+ * map's chunks down to its islands. Every chunk written is new, so it is
+ * marked for remeshing and for its shadow volume.
  *
  * A map smaller than the terrain gets what fits, which is reported by
  * returning false.

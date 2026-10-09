@@ -17,6 +17,20 @@ Point pt(const int64_t x, const int64_t y, const int64_t z = 0) {
 }
 
 /**
+ * A world of two by two cells of ocean. These tests take the checksum every
+ * tick, and an island is a megabyte of blocks to hash each time, which a debug
+ * build feels. The terrain's own place in the checksum is tested with the
+ * terrain (test_sim_terrain.cpp).
+ */
+TerrainSettings small_world() {
+    TerrainSettings settings;
+    settings.cells_x = 2;
+    settings.cells_y = 2;
+    settings.centre_island = false;
+    return settings;
+}
+
+/**
  * A short game played through a queue, recording every stamped command and
  * the checksum after every tick. Routes and vehicles come and go, and a few
  * commands are refused, so the log exercises every command type.
@@ -27,7 +41,7 @@ struct Recording {
 };
 
 Recording play(const uint64_t seed, const int ticks, const int64_t tweak_speed = 0) {
-    Simulation sim(seed);
+    Simulation sim(seed, small_world());
     CommandQueue queue;
     Recording rec;
 
@@ -75,7 +89,7 @@ std::vector<uint64_t> replay(const uint64_t seed, const std::vector<StampedComma
     std::map<uint64_t, std::vector<StampedCommand>> by_tick;
     for (const StampedCommand& c : log) by_tick[c.tick].push_back(c.clone());
 
-    Simulation sim(seed);
+    Simulation sim(seed, small_world());
     std::vector<uint64_t> checksums;
     for (int t = 0; t < ticks; ++t) {
         sim.step(by_tick[sim.tick()]);

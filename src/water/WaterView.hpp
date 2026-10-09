@@ -15,9 +15,10 @@
 #define WATER_VIEW_STR "WaterView"
 
 // How many units a side of a water chunk is, in the terrain's own space (one
-// per voxel). Matches the voxel map's chunks, which is a convenience rather
-// than a requirement: nothing here knows about the map's chunks.
-#define WATER_CHUNK_SIZE 16
+// per voxel). Nothing here knows about the map's chunks. 64 keeps a world of
+// sea down to a few hundred draw calls at most, each chunk a mesh of 64 by 64
+// quads for the waves.
+#define WATER_CHUNK_SIZE 64
 
 // How far below the top of its voxel layer the water's surface sits, so that
 // it is never in the same plane as the top of a column whose ground is at the
@@ -126,6 +127,10 @@ public:
     float wave_length = WATER_WAVE_LENGTH;
     float wave_period = WATER_WAVE_PERIOD;
 
+    // The sea floor's colour, drawn opaque under the water. Unlit, so it is a
+    // little darker than the stone it stands in for.
+    Color floor_colour{104, 104, 100, 255};
+
     /**
      * @param camera: the camera to draw with and to cull against. Borrowed, so
      *        it has to outlive the view (it is the VoxelView's).
@@ -148,6 +153,17 @@ public:
     void update(float delta_time) override;
     void render() override;
 
+    /** Covers a size_x by size_z area from the terrain's origin instead, in voxels. */
+    void set_area(int size_x, int size_z);
+
+    /**
+     * The sea floor where the voxel map holds nothing: flat squares at
+     * `height` (the terrain's Y), drawn opaque in floor_colour before the
+     * water, with the same mesh, shader and culling. main.cpp hands in one
+     * per ocean cell, which the map leaves out (build_terrain_voxels()).
+     */
+    void set_floor(std::vector<WaterChunk> rects, float height);
+
     size_t chunk_count() const { return chunks.size(); }
     // How many chunks the last render() drew, i.e. passed the camera test
     size_t visible_chunk_count() const { return visible_last_frame; }
@@ -162,6 +178,8 @@ public:
 private:
     const raylib::Camera* camera;
     std::vector<WaterChunk> chunks;
+    std::vector<WaterChunk> floor_rects;
+    float floor_height{0.0f};
 
     // One WATER_CHUNK_SIZE square, centred on the origin and cut into a quad
     // per unit (so a wave shader has vertices to move), shared by every chunk.

@@ -9,6 +9,7 @@
 #include "PerlinNoise.hpp"
 #include "entity/SimConvert.hpp"
 #include "entity/TerrainVoxels.hpp"
+#include "sim/Island.hpp"
 #include "sim/Noise.hpp"
 
 /**
@@ -65,7 +66,7 @@ TEST_CASE("the terrain's voxels are in the map's palette", "[terrain]") {
 }
 
 TEST_CASE("a terrain is drawn into the map a block to a cube of voxels", "[terrain]") {
-    sim::Terrain terrain(3, 2, 2);
+    sim::Terrain terrain = sim::Terrain::of_blocks(3, 2, 2);
     terrain.set(0, 0, 0, sim::BlockType::Stone);
     terrain.set(0, 0, 1, sim::BlockType::Grass);
     terrain.set(2, 1, 0, sim::BlockType::Dirt);
@@ -78,7 +79,7 @@ TEST_CASE("a terrain is drawn into the map a block to a cube of voxels", "[terra
     // Two chunks across, so the terrain is not all in one of them, and one
     // voxel left over from before that has to go
     VoxelMap map(nullptr, 32, 16);
-    *map.get_voxel(Int3{20, 10, 3}) = 5;
+    REQUIRE(map.set_voxel(Int3{20, 10, 3}, 5));
     for (auto& [chunk_pos, dirty] : map.chunk_was_updated) dirty = false;
     for (auto& [chunk_pos, dirty] : map.chunk_volume_dirty) dirty = false;
 
@@ -92,19 +93,19 @@ TEST_CASE("a terrain is drawn into the map a block to a cube of voxels", "[terra
                 const sim::BlockType block = terrain.get(x / BLOCK_VOXELS, y / BLOCK_VOXELS, z / BLOCK_VOXELS);
                 const BlockDetail detail = block_detail(terrain, x / BLOCK_VOXELS, y / BLOCK_VOXELS,
                                                         z / BLOCK_VOXELS);
-                REQUIRE(*map.get_voxel(at) == block_voxel(block, detail, in_block));
+                REQUIRE(test::voxel_at(map, at) == block_voxel(block, detail, in_block));
             }
         }
     }
 
     // Spot checks of the same thing: grass on top of the stone, green only
     // on its top layer
-    REQUIRE(*map.get_voxel(Int3{1, 2, 3}) == STONE_VOXEL);
-    REQUIRE(*map.get_voxel(Int3{1, 2, 4}) == DIRT_VOXEL);
-    REQUIRE(*map.get_voxel(Int3{1, 2, 7}) == GRASS_VOXEL);
-    REQUIRE(*map.get_voxel(Int3{1, 2, 8}) == 0);
-    REQUIRE(*map.get_voxel(Int3{9, 5, 0}) == DIRT_VOXEL);
-    REQUIRE(*map.get_voxel(Int3{20, 10, 3}) == 0);
+    REQUIRE(test::voxel_at(map, Int3{1, 2, 3}) == STONE_VOXEL);
+    REQUIRE(test::voxel_at(map, Int3{1, 2, 4}) == DIRT_VOXEL);
+    REQUIRE(test::voxel_at(map, Int3{1, 2, 7}) == GRASS_VOXEL);
+    REQUIRE(test::voxel_at(map, Int3{1, 2, 8}) == 0);
+    REQUIRE(test::voxel_at(map, Int3{9, 5, 0}) == DIRT_VOXEL);
+    REQUIRE(test::voxel_at(map, Int3{20, 10, 3}) == 0);
 
     for (const auto& [chunk_pos, dirty] : map.chunk_was_updated) REQUIRE(dirty);
     for (const auto& [chunk_pos, dirty] : map.chunk_volume_dirty) REQUIRE(dirty);
@@ -117,7 +118,7 @@ namespace {
  * under grass, two blocks tall.
  */
 sim::Terrain bump_terrain() {
-    sim::Terrain terrain(3, 3, 3);
+    sim::Terrain terrain = sim::Terrain::of_blocks(3, 3, 3);
     for (int x = 0; x < 3; ++x)
         for (int y = 0; y < 3; ++y)
             terrain.set(x, y, 0, sim::BlockType::Grass);
@@ -154,7 +155,7 @@ TEST_CASE("which blocks get lowered edges and which get trims", "[terrain][detai
     REQUIRE(block_detail(terrain, 1, 1, 2) == BlockDetail{});
 
     // A pit between two walls and a floor gets a trim on both sides
-    sim::Terrain pit(3, 1, 2);
+    sim::Terrain pit = sim::Terrain::of_blocks(3, 1, 2);
     for (int x = 0; x < 3; ++x) pit.set(x, 0, 0, sim::BlockType::Dirt);
     pit.set(0, 0, 1, sim::BlockType::Stone);
     pit.set(2, 0, 1, sim::BlockType::Stone);
@@ -241,7 +242,7 @@ TEST_CASE("a trim is a row along the bottom, made of the floor", "[terrain][deta
 TEST_CASE("a trim stops where the floor's edge is lowered under it", "[terrain][detail]") {
     // A floor block with a wall on +X and drops on -Y and +Y: the trim along
     // the wall runs over both of the floor's lowered edges at its ends
-    sim::Terrain terrain(2, 3, 2);
+    sim::Terrain terrain = sim::Terrain::of_blocks(2, 3, 2);
     terrain.set(0, 1, 0, sim::BlockType::Grass);
     terrain.set(1, 1, 0, sim::BlockType::Stone);
     terrain.set(1, 1, 1, sim::BlockType::Grass);
@@ -262,10 +263,10 @@ TEST_CASE("a trim stops where the floor's edge is lowered under it", "[terrain][
     for (int y = 0; y < 12; ++y) {
         for (int x = 0; x < 8; ++x) {
             const Int3 trim_layer{x, y, 4};
-            if (*map.get_voxel(trim_layer) == 0) continue;
+            if (test::voxel_at(map, trim_layer) == 0) continue;
             // Either part of the wall block, or a trim standing on the floor
             const bool wall = x >= 4;
-            REQUIRE((wall || *map.get_voxel(Int3{x, y, 3}) != 0));
+            REQUIRE((wall || test::voxel_at(map, Int3{x, y, 3}) != 0));
         }
     }
 }
@@ -278,31 +279,31 @@ TEST_CASE("the detail is drawn into the map", "[terrain][detail]") {
 
     // The bump is block (1, 1, 1), voxels 4 to 7 on every axis. Its -X top
     // edge is lowered, and the green comes down with it.
-    REQUIRE(*map.get_voxel(Int3{4, 5, 7}) == 0);
-    REQUIRE(*map.get_voxel(Int3{4, 5, 6}) == GRASS_VOXEL);
-    REQUIRE(*map.get_voxel(Int3{5, 5, 7}) == GRASS_VOXEL);
-    REQUIRE(*map.get_voxel(Int3{5, 5, 6}) == DIRT_VOXEL);
+    REQUIRE(test::voxel_at(map, Int3{4, 5, 7}) == 0);
+    REQUIRE(test::voxel_at(map, Int3{4, 5, 6}) == GRASS_VOXEL);
+    REQUIRE(test::voxel_at(map, Int3{5, 5, 7}) == GRASS_VOXEL);
+    REQUIRE(test::voxel_at(map, Int3{5, 5, 6}) == DIRT_VOXEL);
 
 #if TERRAIN_TRIMS
     // The air block beside it, (0, 1, 1), has a grass trim on its +X side,
     // on top of the floor and against the bump
-    for (int y = 4; y < 8; ++y) REQUIRE(*map.get_voxel(Int3{3, y, 4}) == GRASS_VOXEL);
+    for (int y = 4; y < 8; ++y) REQUIRE(test::voxel_at(map, Int3{3, y, 4}) == GRASS_VOXEL);
 #else
     // No trim against it: the floor meets the bump in a plain step
-    for (int y = 4; y < 8; ++y) REQUIRE(*map.get_voxel(Int3{3, y, 4}) == 0);
+    for (int y = 4; y < 8; ++y) REQUIRE(test::voxel_at(map, Int3{3, y, 4}) == 0);
 #endif
-    REQUIRE(*map.get_voxel(Int3{3, 5, 5}) == 0);
-    REQUIRE(*map.get_voxel(Int3{2, 5, 4}) == 0);
+    REQUIRE(test::voxel_at(map, Int3{3, 5, 5}) == 0);
+    REQUIRE(test::voxel_at(map, Int3{2, 5, 4}) == 0);
 
     // Diagonal to the bump, (0, 0, 1), there is nothing
     for (int x = 0; x < 4; ++x)
         for (int y = 0; y < 4; ++y)
-            REQUIRE(*map.get_voxel(Int3{x, y, 4}) == 0);
+            REQUIRE(test::voxel_at(map, Int3{x, y, 4}) == 0);
 }
 
 TEST_CASE("a terrain bigger than the map is drawn as far as it fits", "[terrain]") {
     // Five blocks tall is 20 voxels, and this map is one chunk (16) tall
-    sim::Terrain terrain(2, 2, 5);
+    sim::Terrain terrain = sim::Terrain::of_blocks(2, 2, 5);
     for (int z = 0; z < 5; ++z) terrain.set(0, 0, z, sim::BlockType::Stone);
     // And past the map's edge on x
     terrain.set(1, 0, 0, sim::BlockType::Dirt);
@@ -310,30 +311,63 @@ TEST_CASE("a terrain bigger than the map is drawn as far as it fits", "[terrain]
     VoxelMap map(nullptr, 6, 8);
     REQUIRE_FALSE(build_terrain_voxels(map, terrain));
 
-    REQUIRE(*map.get_voxel(Int3{0, 0, 15}) == STONE_VOXEL);
-    REQUIRE(*map.get_voxel(Int3{5, 0, 0}) == DIRT_VOXEL);
+    REQUIRE(test::voxel_at(map, Int3{0, 0, 15}) == STONE_VOXEL);
+    REQUIRE(test::voxel_at(map, Int3{5, 0, 0}) == DIRT_VOXEL);
 }
 
-TEST_CASE("the game's map is 128 voxels on every side", "[terrain]") {
-    // The water, the camera and the test routes were all laid out for a 128
-    // voxel map, and it is 128 tall since the map could have more chunks than one
-    const sim::Terrain terrain = sim::generate_terrain(sim::TerrainSettings{});
-    const Int3 size = terrain_voxel_size(terrain);
-    REQUIRE(size.x == 128);
-    REQUIRE(size.y == 128);
-    REQUIRE(size.z == 128);
+TEST_CASE("the game's map holds the whole world, a cell to 256 voxels", "[terrain]") {
+    // Ten by ten cells of 64 blocks, 64 tall, at four voxels a block
+    const sim::Terrain world = sim::generate_terrain(sim::TerrainSettings{});
+    const Int3 size = terrain_voxel_size(world);
+    REQUIRE(size.x == sim::DEFAULT_WORLD_CELLS * 256);
+    REQUIRE(size.y == sim::DEFAULT_WORLD_CELLS * 256);
+    REQUIRE(size.z == 256);
 
+    // A map that size holds nothing until something is written to it
+    const VoxelMap world_map(nullptr, size.x, size.y, size.z);
+    REQUIRE(world_map.get_chunk_count() == Int3{160, 160, 16});
+    REQUIRE(world_map.chunks.empty());
+}
+
+TEST_CASE("only the land is drawn into the map, and only where it stands", "[terrain]") {
+    // Three by two cells, a flat island on the two by two on the left, so the
+    // right hand column of cells is ocean
+    sim::Terrain terrain(3, 2);
+    sim::IslandSpec spec;
+    spec.elevation = sim::Elevation::Flat;
+    REQUIRE(sim::place_island(terrain, 0, 0, spec, sim::DEFAULT_WATER_LEVEL));
+
+    const Int3 size = terrain_voxel_size(terrain);
     VoxelMap map(nullptr, size.x, size.y, size.z);
-    REQUIRE(map.get_height() == 128);
-    REQUIRE(map.get_chunk_count() == Int3{8, 8, 8});
     REQUIRE(build_terrain_voxels(map, terrain));
 
-    // The shadow volume is cut off at the highest block there is
+    // Chunks over the island only, and only as high as it stands
     int highest = 0;
     for (int x = 0; x < terrain.size_x(); ++x)
         for (int y = 0; y < terrain.size_y(); ++y)
             highest = std::max(highest, terrain.column_height(x, y));
+    REQUIRE_FALSE(map.chunks.empty());
+    for (const auto& [chunk_pos, chunk] : map.chunks) {
+        REQUIRE(chunk_pos.x < 2 * 256 / CHUNK_SIZE);
+        REQUIRE(chunk_pos.z * CHUNK_SIZE < highest * BLOCK_VOXELS + BLOCK_VOXELS);
+    }
+
+    // The ocean cell's sea floor is not in the map: the water view draws it
+    REQUIRE(test::voxel_at(map, Int3{600, 10, 0}) == 0);
+    // The island's own sea floor is
+    REQUIRE(test::voxel_at(map, Int3{2, 2, 0}) == STONE_VOXEL);
+
+    // The shadow volume is cut off at the highest block there is
     REQUIRE(map.solid_top() == highest * BLOCK_VOXELS);
+}
+
+TEST_CASE("every block type has a colour in the map's palette", "[terrain]") {
+    const VoxelMap map(nullptr, 16, 16);
+    for (uint8_t b = 1; b < sim::BLOCK_TYPE_COUNT; ++b) {
+        const VoxelID id = block_voxel(static_cast<sim::BlockType>(b), BlockDetail{}, Int3{0, 0, 0});
+        REQUIRE(id != 0);
+        REQUIRE(map.voxel_colours->count(id) == 1);
+    }
 }
 
 TEST_CASE("a map several chunks tall", "[terrain]") {
@@ -350,15 +384,18 @@ TEST_CASE("a map several chunks tall", "[terrain]") {
     // A voxel in the upper chunk lands there and nowhere else
     for (auto& [chunk_pos, dirty] : map.chunk_was_updated) dirty = false;
     REQUIRE(map.set_voxel(Int3{3, 4, 35}, 2));
-    REQUIRE(*map.get_voxel(Int3{3, 4, 35}) == 2);
-    REQUIRE(*map.get_voxel(Int3{3, 4, 3}) == 0);
-    REQUIRE(*map.get_voxel(Int3{3, 4, 19}) == 0);
+    REQUIRE(test::voxel_at(map, Int3{3, 4, 35}) == 2);
+    REQUIRE(test::voxel_at(map, Int3{3, 4, 3}) == 0);
+    REQUIRE(test::voxel_at(map, Int3{3, 4, 19}) == 0);
     REQUIRE(map.solid_top() == 36);
     REQUIRE(map.chunk_was_updated[Int3{0, 0, 2}]);
     REQUIRE_FALSE(map.chunk_was_updated[Int3{0, 0, 0}]);
 
     // On a chunk's bottom layer, the chunk under it is remeshed too, as its
-    // top faces and corners read across the border
+    // top faces and corners read across the border. Only a chunk that exists:
+    // one that was never written has no mesh to bring up to date, so the
+    // bottom one gets a voxel first.
+    REQUIRE(map.set_voxel(Int3{0, 0, 0}, 1));
     for (auto& [chunk_pos, dirty] : map.chunk_was_updated) dirty = false;
     REQUIRE(map.set_voxel(Int3{3, 4, 16}, 2));
     REQUIRE(map.chunk_was_updated[Int3{0, 0, 1}]);

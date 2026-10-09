@@ -86,7 +86,7 @@ std::vector<uint8_t> write_save(const Simulation& simulation, const CommandQueue
 std::optional<LoadedGame> read_save(const std::span<const uint8_t> bytes, std::string* error) {
     // The seed does not matter: the Rng's whole state comes out of the save.
     // Nor does the terrain, which is read in whole, so none is generated.
-    LoadedGame game{Simulation(0, TerrainSettings{.size_x = 0}), CommandQueue{}};
+    LoadedGame game{Simulation(0, TerrainSettings{.cells_x = 0}), CommandQueue{}};
     World& world = SaveAccess::world(game.simulation);
 
     const std::map<uint32_t, SectionReader> readers = {

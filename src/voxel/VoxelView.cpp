@@ -66,8 +66,15 @@ void VoxelView::bindWorldVolume() const {
     // World space back into the map's own space, which is where its voxels
     // are. Worked out every frame rather than cached, so that moving the map
     // moves its shadows with it, the same way get_world_transform() is.
+    // Then back by the window's origin, so voxel (0, 0, 0) of the volume is
+    // where the window starts. Model space is the mesher's (X grid x, Y grid
+    // z, Z grid y), which the shader swaps back to grid order after this.
+    // raylib's MatrixMultiply applies the left one first.
     const Matrix map_matrix = transform_to_matrix(game_map->get_world_transform());
-    SetShaderValueMatrix(*voxel_shader, world_to_volume_loc, MatrixInvert(map_matrix));
+    const Matrix window = MatrixTranslate(static_cast<float>(-world_volume_origin.x),
+                                          static_cast<float>(-world_volume_origin.z),
+                                          static_cast<float>(-world_volume_origin.y));
+    SetShaderValueMatrix(*voxel_shader, world_to_volume_loc, MatrixMultiply(MatrixInvert(map_matrix), window));
 
     // Cut off at the top of the ground: nothing above it can block a ray, so a
     // ray leaving this shorter box is exactly as lit as one leaving the whole
@@ -195,7 +202,7 @@ void VoxelView::updateVoxelMesh() const {
 
 void VoxelView::updateVolumes() {
     // The map's voxels, which every shadow ray is traced against
-    if (game_map->update_volume(world_volume)) world_volume_top = game_map->solid_top();
+    if (game_map->update_volume(world_volume, world_volume_origin)) world_volume_top = game_map->solid_top();
 
     // And a brick for every other grid. A grid keeps its slot for as long as it
     // lives and hands it back in its destructor, so this only ever hands out
@@ -227,6 +234,29 @@ void VoxelView::updateVolumes() {
 
 void VoxelView::release_grid_volume(const int slot) {
     grid_atlas.release_slot(slot);
+}
+
+void VoxelView::set_volume_window(const Int3 origin, const Int3 size) {
+    // Whole chunks, so that a chunk upload never hangs over the texture's edge
+    const auto down = [](const int v) { return std::max(0, v) / CHUNK_SIZE * CHUNK_SIZE; };
+    const auto up = [](const int v) { return (std::max(0, v) + CHUNK_SIZE - 1) / CHUNK_SIZE * CHUNK_SIZE; };
+
+    const Int3 chunk_count = game_map->get_chunk_count();
+    const Int3 map_voxels{chunk_count.x * CHUNK_SIZE, chunk_count.y * CHUNK_SIZE, chunk_count.z * CHUNK_SIZE};
+
+    const Int3 start{std::min(down(origin.x), map_voxels.x), std::min(down(origin.y), map_voxels.y), 0};
+    const Int3 end{
+        std::min({up(origin.x + size.x), map_voxels.x, start.x + MAX_WORLD_VOLUME_SIDE}),
+        std::min({up(origin.y + size.y), map_voxels.y, start.y + MAX_WORLD_VOLUME_SIDE}),
+        std::min(up(size.z), map_voxels.z),
+    };
+
+    world_volume_origin = start;
+    // Never empty, so the shader always has a texture to read
+    world_volume.create(Int3{std::max(end.x - start.x, CHUNK_SIZE), std::max(end.y - start.y, CHUNK_SIZE),
+                             std::max(end.z, CHUNK_SIZE)});
+    world_volume_top = 0;
+    for (auto& [chunk_pos, dirty] : game_map->chunk_volume_dirty) dirty = true;
 }
 
 VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader, const Int3 map_size)
@@ -276,12 +306,13 @@ VoxelView::VoxelView(ViewNode* parent, raylib::Shader* shader, const Int3 map_si
                             static_cast<uint32_t>(map_size.z));
     voxel_grids.emplace_back(game_map);
 
-    // The voxels the shadow rays are traced against. Sized to whole chunks
-    // rather than to the map, so that a chunk upload can never hang over the
-    // edge of the texture. The map fills it on the first update.
-    const Int3 chunk_count = game_map->get_chunk_count();
-    world_volume.create(Int3{chunk_count.x * CHUNK_SIZE, chunk_count.y * CHUNK_SIZE,
-                             chunk_count.z * CHUNK_SIZE});
+    // The voxels the shadow rays are traced against: the whole map when it
+    // fits in one window. A world map does not, and starts with a window of a
+    // single chunk rather than a huge one the game is about to throw away: it
+    // puts the window over its land with set_volume_window(). The map fills
+    // it on the first update.
+    const bool fits = map_size.x <= MAX_WORLD_VOLUME_SIDE && map_size.y <= MAX_WORLD_VOLUME_SIDE;
+    set_volume_window(Int3{0, 0, 0}, fits ? map_size : Int3{CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE});
 
     // A brick each for every other grid, so that a vehicle casts a shadow and
     // shadows itself. Slots are handed out as the grids are first uploaded.

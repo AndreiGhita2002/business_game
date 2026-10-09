@@ -15,14 +15,18 @@ class VoxelVolume;
 
 #define VOXEL_MAP_STR "VoxelMap"
 
-// The most voxels a map read from a file may be along any axis
-constexpr int MAX_MAP_SIZE = 4096;
+// The most voxels a map read from a file may be along any axis. The largest
+// world (sim::MAX_WORLD_CELLS cells of 256 voxels) is 8192 across.
+constexpr int MAX_MAP_SIZE = 8192;
 
 class VoxelMap final : public VoxelGrid {
 
 public:
     // Keyed by chunk coordinate: chunk (cx, cy, cz) holds the voxels from
-    // CHUNK_SIZE * (cx, cy, cz) onwards
+    // CHUNK_SIZE * (cx, cy, cz) onwards. Sparse: a chunk is only here once
+    // something has been written to it (ensure_chunk()), and a chunk that is
+    // not here is air. A world map is mostly ocean, which the map never holds,
+    // so most of its chunks never exist.
     std::map<Int3, VoxelChunk> chunks;
     std::map<Int3, bool> chunk_was_updated;
     // The same question for the shadow volume, which is a separate flag because
@@ -32,7 +36,7 @@ public:
     std::map<Int3, ModelInfo> chunk_models;
 
     /**
-     * A map of air. The terrain is the simulation's now: the game draws it in
+     * A map of air, with no chunks yet. The terrain is the simulation's: the game draws it in
      * with build_terrain_voxels() (entity/TerrainVoxels.hpp), and a map read
      * from a file is filled in by load_body().
      *
@@ -70,13 +74,29 @@ public:
      * Writes every chunk that has changed since the last call into the volume
      * the lighting shader traces its shadow rays through.
      *
-     * The chunks go in at the same place they are meshed at, so what casts a
-     * shadow and what is drawn cannot drift apart.
+     * The volume holds a window of the map, starting at `window_origin` (in
+     * voxels, whole chunks), as a whole world map is far too big for one 3D
+     * texture. A chunk goes in at its place in the map less that origin, so
+     * what casts a shadow and what is drawn cannot drift apart; a chunk
+     * outside the window is left out, and casts no shadow.
      *
      * Says whether anything was uploaded, which is when solid_top() may have
      * moved.
      */
-    bool update_volume(VoxelVolume& volume);
+    bool update_volume(VoxelVolume& volume, Int3 window_origin = Int3{0, 0, 0});
+
+    /**
+     * The chunk at chunk coordinate `chunk_pos`, made as air if it did not
+     * exist, and marked for remeshing and for its shadow volume when it is
+     * new. The caller keeps to the map's bounds.
+     */
+    VoxelChunk& ensure_chunk(Int3 chunk_pos);
+
+    /** Drops every chunk and its model, leaving a map of air. */
+    void clear();
+
+    /** A map of air of another size, as the constructor makes. */
+    void resize(uint32_t size_x, uint32_t size_y, uint32_t size_z);
 
     /**
      * One above the highest layer with a solid voxel in it, 0 for a map of
@@ -89,7 +109,7 @@ public:
     int get_height() const;
 
     Int3 get_chunk_count() const;
-    /** The chunk holding the voxel at `pos`, a grid position, or null outside the map. */
+    /** The chunk holding the voxel at `pos`, a grid position, or null where there is none (air). */
     VoxelChunk* get_chunk(Int3 pos);
 
     static VoxelID* get_chunk_voxel(VoxelChunk& chunk, Int3 pos);
