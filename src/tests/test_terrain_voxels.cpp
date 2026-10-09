@@ -143,6 +143,7 @@ TEST_CASE("which blocks get lowered edges and which get trims", "[terrain][detai
     // A corner of the floor: open on its two sides off the map
     REQUIRE(block_detail(terrain, 0, 0, 0).lowered == (SIDE_X_NEG | SIDE_Y_NEG));
 
+#if TERRAIN_TRIMS
     // The air beside the bump, on the floor: a trim against it, of grass,
     // with the floor's own lowered edges noted
     REQUIRE(block_detail(terrain, 0, 1, 1) == BlockDetail{0, SIDE_X_POS, sim::BlockType::Grass, SIDE_X_NEG});
@@ -161,6 +162,11 @@ TEST_CASE("which blocks get lowered edges and which get trims", "[terrain][detai
     // lowered, and the trims stop short over them
     REQUIRE(block_detail(pit, 1, 0, 1) == BlockDetail{0, SIDE_X_POS | SIDE_X_NEG, sim::BlockType::Dirt,
                                                       static_cast<uint8_t>(SIDE_Y_POS | SIDE_Y_NEG)});
+#else
+    // Trims are switched off: the air beside the bump is only air
+    REQUIRE(block_detail(terrain, 0, 1, 1) == BlockDetail{});
+    REQUIRE(block_detail(terrain, 1, 2, 1) == BlockDetail{});
+#endif
 }
 
 TEST_CASE("a lowered edge takes the top row off that side", "[terrain][detail]") {
@@ -231,6 +237,7 @@ TEST_CASE("a trim is a row along the bottom, made of the floor", "[terrain][deta
     REQUIRE(block_voxel(sim::BlockType::Air, detail, Int3{3, 0, 0}) == 0);
 }
 
+#if TERRAIN_TRIMS
 TEST_CASE("a trim stops where the floor's edge is lowered under it", "[terrain][detail]") {
     // A floor block with a wall on +X and drops on -Y and +Y: the trim along
     // the wall runs over both of the floor's lowered edges at its ends
@@ -262,6 +269,7 @@ TEST_CASE("a trim stops where the floor's edge is lowered under it", "[terrain][
         }
     }
 }
+#endif
 
 TEST_CASE("the detail is drawn into the map", "[terrain][detail]") {
     const sim::Terrain terrain = bump_terrain();
@@ -275,9 +283,14 @@ TEST_CASE("the detail is drawn into the map", "[terrain][detail]") {
     REQUIRE(*map.get_voxel(Int3{5, 5, 7}) == GRASS_VOXEL);
     REQUIRE(*map.get_voxel(Int3{5, 5, 6}) == DIRT_VOXEL);
 
+#if TERRAIN_TRIMS
     // The air block beside it, (0, 1, 1), has a grass trim on its +X side,
     // on top of the floor and against the bump
     for (int y = 4; y < 8; ++y) REQUIRE(*map.get_voxel(Int3{3, y, 4}) == GRASS_VOXEL);
+#else
+    // No trim against it: the floor meets the bump in a plain step
+    for (int y = 4; y < 8; ++y) REQUIRE(*map.get_voxel(Int3{3, y, 4}) == 0);
+#endif
     REQUIRE(*map.get_voxel(Int3{3, 5, 5}) == 0);
     REQUIRE(*map.get_voxel(Int3{2, 5, 4}) == 0);
 

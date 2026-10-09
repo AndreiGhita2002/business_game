@@ -62,6 +62,7 @@ BlockDetail block_detail(const sim::Terrain& terrain, const int32_t x, const int
         return detail;
     }
 
+#if TERRAIN_TRIMS
     // Air: a trim needs a floor to stand on and a wall to lean on
     const sim::BlockType below = terrain.get(x, y, z - 1);
     if (below == sim::BlockType::Air) return detail;
@@ -72,6 +73,8 @@ BlockDetail block_detail(const sim::Terrain& terrain, const int32_t x, const int
         detail.trim_type = below;
         detail.floor_lowered = block_detail(terrain, x, y, z - 1).lowered;
     }
+#endif
+    // Air with no trims is drawn as nothing at all
     return detail;
 }
 

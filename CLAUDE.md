@@ -254,7 +254,10 @@ square root), and a vehicle drives round one at a fixed speed per tick.
     voxels on each side with air beside it. Grass comes down with it (green is
     the top voxel of each column). A buried block keeps its edges, so a cliff
     face gets no grooves.
-  - *Trims*: an air block with a solid block under it gets a row of voxels on
+  - *Trims*, **off** (`TERRAIN_TRIMS` 0 in `TerrainVoxels.hpp`; Andrei did
+    not like how they looked, 1 or `-DTERRAIN_TRIMS=1` brings them back and
+    the tests follow the switch): an air block with a solid block under it
+    gets a row of voxels on
     its bottom layer along each side with a solid block beside it, filling the
     inside corner. It is made of the floor (`trim_type`, green on grass), and
     leaves out the voxels over the floor's own lowered edges

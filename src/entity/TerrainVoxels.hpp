@@ -24,7 +24,8 @@ class VoxelMap;
  *   - Lowered edges. A solid block with air above it loses its top row of
  *     voxels on every side that has air next to it. On grass, the green comes
  *     down with it, onto the voxel that is now on top.
- *   - Trims. An air block with a solid block under it gets a row of voxels on
+ *   - Trims, off unless TERRAIN_TRIMS is 1. An air block with a solid block
+ *     under it gets a row of voxels on
  *     its bottom layer along every side that has a solid block next to it,
  *     filling the inside corner where the floor meets the wall. It is made of
  *     the floor: green on grass. It stops short where the floor's own edge
@@ -34,6 +35,15 @@ class VoxelMap;
  * terrain counts as air, like everywhere else. None of it reaches the
  * simulation: a vehicle still drives on the block tops (Terrain::ground_level).
  */
+
+/**
+ * Whether block_detail() gives air blocks trims. Off: the raised rows looked
+ * worse than the plain step. Everything else about them is still here and
+ * still tested, so 1 brings them back, here or with -DTERRAIN_TRIMS=1.
+ */
+#ifndef TERRAIN_TRIMS
+#define TERRAIN_TRIMS 0
+#endif
 
 /**
  * How many voxels a block is drawn as along each side. A voxel is drawn one
