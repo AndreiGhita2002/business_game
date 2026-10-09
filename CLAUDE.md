@@ -684,7 +684,7 @@ and saved in `CORE`. Nothing in the simulation reads it yet.
   drawn here too: `set_floor()` takes a square per ocean cell and a height
   (`start_world()` hands in the sea floor's top), drawn first, opaque in
   `floor_colour`, through the same mesh, shader and culling with the waves
-  stilled, but with a mesh of its own: one quad per square, as it has no
+  stilled, but with `flat_mesh`: one quad per square, as it has no
   waves to need vertices for. Unlit, so its colour is a stand-in for lit stone.
 - Only chunks inside the camera's frustum are drawn: `game/Frustum` extracts
   the planes from terrain x `rlGetMatrixModelview()` x `rlGetMatrixProjection()`
@@ -711,6 +711,16 @@ and saved in `CORE`. Nothing in the simulation reads it yet.
   default to 0.2, 8 and 3 s; the amplitude is static_asserted under
   `WATER_SURFACE_INSET` (a crest never reaches the next voxel layer) and
   `WATER_BOUNDS_MARGIN` (the culling never clips a crest).
+- **Level of detail.** The waves fade out with distance from the camera,
+  full height up to `wave_fade_near` (120 world units) and flat from
+  `wave_fade_far` (240) on, measured per vertex from where it would be with no
+  wave (`cameraPosition` and `waveFade` uniforms; `water_wave_fade()` is the
+  C++ twin). A chunk whose box is wholly past `wave_fade_far`
+  (`distance_to_box()` of its box carried into the world by `transform_box()`)
+  is drawn with `flat_mesh`, one quad, instead of the 64 by 64 wave mesh. No
+  seam: the edge a flat chunk shares with a full one is past the fade too, so
+  it is flat on both sides. `full_detail_chunk_count()` says how many were
+  drawn in full.
 - The shader is owned by the material: `UnloadMaterial()` in the destructor
   unloads it, while the window is still open (the view tree goes before it).
 

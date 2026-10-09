@@ -33,6 +33,13 @@ uniform float waveTime;
 uniform float waveAmplitude;   // terrain units (voxels)
 uniform float waveNumber;      // 2 pi / wavelength
 uniform float waveSpeed;       // 2 pi / period, radians per second
+// Where the camera is in the world, and the distances from it (world units)
+// over which the waves fade: full height up to x, flat from y on. Far water is
+// flat, which is what lets WaterView draw a chunk wholly past y as one quad
+// without a seam against its neighbours. water_wave_fade() in WaterView.cpp is
+// the C++ twin of the fade: change the two together.
+uniform vec3 cameraPosition;
+uniform vec2 waveFade;
 
 // Output vertex attributes (to fragment shader). Unused by the flat colour,
 // passed on for whatever the fragment half does next.
@@ -40,9 +47,9 @@ out vec3 fragPosition;
 out vec2 fragTexCoord;
 out vec3 fragNormal;
 
-float wave_height(vec2 terrain_xz) {
+float wave_height(vec2 terrain_xz, float amplitude) {
     float r = length(terrain_xz);
-    return waveAmplitude * sin(waveNumber * r - waveSpeed * waveTime);
+    return amplitude * sin(waveNumber * r - waveSpeed * waveTime);
 }
 
 void main() {
@@ -50,8 +57,15 @@ void main() {
     // the chunk is on the terrain
     vec2 terrain_xz = vertexPosition.xz * chunkRect.zw + chunkRect.xy;
 
+    // How much of the wave is left this far from the camera, measured from
+    // where the vertex would be with no wave on it, so the two sides of a
+    // shared edge always agree
+    float distance_to_camera = length(vec3(matModel * vec4(vertexPosition, 1.0)) - cameraPosition);
+    float fade = clamp((waveFade.y - distance_to_camera) / (waveFade.y - waveFade.x), 0.0, 1.0);
+    float amplitude = waveAmplitude * fade;
+
     vec3 position = vertexPosition;
-    position.y += wave_height(terrain_xz);
+    position.y += wave_height(terrain_xz, amplitude);
 
     // The slope of the ripple, for the normal: d(height)/dr times the
     // direction away from the origin. At the origin itself the direction is
@@ -59,7 +73,7 @@ void main() {
     float r = length(terrain_xz);
     vec2 slope = vec2(0.0);
     if (r > 0.0001) {
-        float dh_dr = waveAmplitude * waveNumber * cos(waveNumber * r - waveSpeed * waveTime);
+        float dh_dr = amplitude * waveNumber * cos(waveNumber * r - waveSpeed * waveTime);
         slope = dh_dr * terrain_xz / r;
     }
     // Back into the mesh's own axes, which the chunk's scale stretches

@@ -39,6 +39,8 @@
 #define WATER_WAVE_AMPLITUDE 0.2f   // voxels, either side of the surface
 #define WATER_WAVE_LENGTH 8.0f      // voxels, crest to crest
 #define WATER_WAVE_PERIOD 3.0f      // seconds for a crest to move one wavelength
+#define WATER_WAVE_FADE_NEAR 120.0f // world units from the camera, waves full height
+#define WATER_WAVE_FADE_FAR 240.0f  // and flat from here on
 static_assert(WATER_WAVE_AMPLITUDE < WATER_SURFACE_INSET, "a crest would reach the next voxel layer");
 static_assert(WATER_WAVE_AMPLITUDE <= WATER_BOUNDS_MARGIN, "the culling would cut crests off");
 
@@ -85,6 +87,19 @@ BoundingBox water_chunk_bounds(const WaterChunk& chunk, float surface_y);
 float water_wave_height(float x, float z, float time, float amplitude, float length, float period);
 
 /**
+ * How much of its height a wave keeps `distance` world units from the camera:
+ * 1 up to `near`, 0 from `far` on, and a straight line between. The twin of
+ * the fade in resources/shaders/water.vs: change the two together.
+ */
+float water_wave_fade(float distance, float near, float far);
+
+/** How far `point` is from the nearest point of `box`, 0 inside it. */
+float distance_to_box(Vector3 point, BoundingBox box);
+
+/** The box round `box`'s eight corners once `matrix` has moved them. */
+BoundingBox transform_box(BoundingBox box, Matrix matrix);
+
+/**
  * The water: a flat plane at one level over the whole map, drawn with its own
  * shader (resources/shaders/water.vs/.fs).
  *
@@ -126,6 +141,12 @@ public:
     float wave_amplitude = WATER_WAVE_AMPLITUDE;
     float wave_length = WATER_WAVE_LENGTH;
     float wave_period = WATER_WAVE_PERIOD;
+    // World units from the camera over which the waves fade out, full height
+    // at `near` and flat from `far` on (water_wave_fade()). A wave a fifth of a
+    // voxel tall is under a pixel by then. A chunk wholly past `far` is drawn
+    // as one quad rather than the 64 by 64 the waves need.
+    float wave_fade_near = WATER_WAVE_FADE_NEAR;
+    float wave_fade_far = WATER_WAVE_FADE_FAR;
 
     // The sea floor's colour, drawn opaque under the water. Unlit, so it is a
     // little darker than the stone it stands in for.
@@ -167,6 +188,8 @@ public:
     size_t chunk_count() const { return chunks.size(); }
     // How many chunks the last render() drew, i.e. passed the camera test
     size_t visible_chunk_count() const { return visible_last_frame; }
+    // How many of them were drawn in full detail, the rest being flat quads
+    size_t full_detail_chunk_count() const { return full_detail_last_frame; }
 
     /**
      * The matrix one chunk is drawn with: the shared mesh scaled to the chunk
@@ -185,8 +208,9 @@ private:
     // per unit (so a wave shader has vertices to move), shared by every chunk.
     // A chunk that is cut short at the edge is drawn scaled down to fit.
     Mesh chunk_mesh{};
-    // The same square as a single quad, for the sea floor, which never moves
-    Mesh floor_mesh{};
+    // The same square as a single quad, for what is flat: the sea floor, and
+    // water past the waves' fade
+    Mesh flat_mesh{};
     // Carries the water shader, which it owns: UnloadMaterial() unloads it.
     Material material{};
 
@@ -196,6 +220,8 @@ private:
     int wave_amplitude_loc{-1};
     int wave_number_loc{-1};
     int wave_speed_loc{-1};
+    int wave_fade_loc{-1};
+    int camera_position_loc{-1};
 
     // Frame time, not game time: the waves are cosmetic and keep moving while
     // the simulation is paused. Wrapped round once a wave period, which
@@ -204,6 +230,7 @@ private:
     float wave_time{0.0f};
 
     size_t visible_last_frame{0};
+    size_t full_detail_last_frame{0};
 };
 
 #endif //BUSINESS_GAME_WATERVIEW_HPP

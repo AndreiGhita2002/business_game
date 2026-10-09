@@ -215,3 +215,56 @@ TEST_CASE("culling in the terrain's space follows the terrain", "[water]") {
     REQUIRE_FALSE(frustum_contains_box(shifted_f, water_chunk_bounds(chunks[0], surface)));
     REQUIRE(frustum_contains_box(shifted_f, water_chunk_bounds(chunks[2], surface)));
 }
+
+TEST_CASE("the waves fade out with distance from the camera", "[water][waves]") {
+    REQUIRE(water_wave_fade(0.0f, 100.0f, 200.0f) == 1.0f);
+    REQUIRE(water_wave_fade(100.0f, 100.0f, 200.0f) == 1.0f);
+    REQUIRE(water_wave_fade(150.0f, 100.0f, 200.0f) == Approx(0.5f));
+    REQUIRE(water_wave_fade(200.0f, 100.0f, 200.0f) == 0.0f);
+    REQUIRE(water_wave_fade(5000.0f, 100.0f, 200.0f) == 0.0f);
+    // A fade with no width is a hard edge, not a division by zero
+    REQUIRE(water_wave_fade(99.0f, 100.0f, 100.0f) == 1.0f);
+    REQUIRE(water_wave_fade(101.0f, 100.0f, 100.0f) == 0.0f);
+    // The defaults fade before the water is drawn flat
+    REQUIRE(WATER_WAVE_FADE_NEAR < WATER_WAVE_FADE_FAR);
+}
+
+TEST_CASE("how far a point is from a box", "[water]") {
+    const BoundingBox box{Vector3{0, 0, 0}, Vector3{10, 2, 10}};
+    REQUIRE(distance_to_box(Vector3{5, 1, 5}, box) == 0.0f);
+    REQUIRE(distance_to_box(Vector3{13, 1, 5}, box) == Approx(3.0f));
+    REQUIRE(distance_to_box(Vector3{13, 6, 5}, box) == Approx(5.0f));   // 3, 4, 5
+    REQUIRE(distance_to_box(Vector3{-3, 1, -4}, box) == Approx(5.0f));
+}
+
+TEST_CASE("a box carried through a matrix is the box round its corners", "[water]") {
+    const BoundingBox box{Vector3{0, 0, 0}, Vector3{4, 1, 2}};
+    // A quarter turn about up, then moved: x and z swap round
+    const BoundingBox moved = transform_box(box, MatrixMultiply(MatrixRotateY(PI / 2.0f),
+                                                                 MatrixTranslate(10.0f, 0.0f, 0.0f)));
+    REQUIRE(moved.max.x - moved.min.x == Approx(2.0f));
+    REQUIRE(moved.max.z - moved.min.z == Approx(4.0f));
+    REQUIRE(moved.max.y - moved.min.y == Approx(1.0f));
+    REQUIRE(moved.min.x == Approx(10.0f));
+}
+
+TEST_CASE("a chunk wholly past the fade is flat where it meets a full one", "[water][waves]") {
+    // The seam argument WaterView leans on: every point of a chunk drawn flat
+    // is at least the fade's far distance from the camera, so the edge it
+    // shares with a full chunk has no wave on the full chunk's side either
+    const auto chunks = water_chunk_layout(8 * WATER_CHUNK_SIZE, WATER_CHUNK_SIZE, WATER_CHUNK_SIZE);
+    const Vector3 eye{10.0f, 40.0f, 10.0f};
+    const float surface = water_surface_height(1);
+    for (size_t i = 0; i + 1 < chunks.size(); ++i) {
+        const bool near_flat = distance_to_box(eye, water_chunk_bounds(chunks[i], surface)) >= WATER_WAVE_FADE_FAR;
+        const bool far_flat = distance_to_box(eye, water_chunk_bounds(chunks[i + 1], surface)) >= WATER_WAVE_FADE_FAR;
+        if (near_flat == far_flat) continue;
+        // The shared edge, x = the far chunk's start, along z
+        const WaterChunk& flat = far_flat ? chunks[i + 1] : chunks[i];
+        const float edge_x = far_flat ? flat.x : flat.x + flat.width;
+        for (float z = flat.z; z <= flat.z + flat.depth; z += 1.0f) {
+            const float d = Vector3Distance(eye, Vector3{edge_x, surface, z});
+            REQUIRE(water_wave_fade(d, WATER_WAVE_FADE_NEAR, WATER_WAVE_FADE_FAR) == 0.0f);
+        }
+    }
+}
