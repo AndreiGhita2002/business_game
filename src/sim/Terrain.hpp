@@ -70,7 +70,7 @@ constexpr int32_t SEA_FLOOR_BLOCKS = 2;
  */
 // 15 puts the water's top at 16 units, four blocks up: two blocks of water
 // over the sea floor.
-constexpr int32_t DEFAULT_WATER_LEVEL = 15;
+constexpr int32_t DEFAULT_WATER_LEVEL = 16;
 constexpr int32_t MIN_WATER_LEVEL = 0;
 
 /** What generate_terrain() makes. The defaults are the game's world. */
